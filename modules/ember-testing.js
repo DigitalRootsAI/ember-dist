@@ -5,7 +5,6 @@
  */
 var slice = [].slice,
     helpers = {},
-    originalMethods = {},
     injectHelpersCallbacks = [];
 
 /**
@@ -115,10 +114,6 @@ Ember.Test = {
   */
   unregisterHelper: function(name) {
     delete helpers[name];
-    if (originalMethods[name]) {
-      this.helperContainer[name] = originalMethods[name];
-    }
-    delete originalMethods[name];
     delete Ember.Test.Promise.prototype[name];
   },
 
@@ -313,6 +308,21 @@ Ember.Application.reopen({
   testHelpers: {},
 
   /**
+   This property will contain the original methods that were registered
+   on the `helperContainer` before `injectTestHelpers` is called.
+
+   When `removeTestHelpers` is called, these methods are restored to the
+   `helperContainer`.
+
+    @property originalMethods
+    @type {Object}
+    @default {}
+    @private
+  */
+  originalMethods: {},
+
+
+  /**
   This property indicates whether or not this application is currently in
   testing mode. This is set when `setupForTesting` is called on the current
   application.
@@ -354,6 +364,10 @@ Ember.Application.reopen({
     if (!Ember.Test.adapter) {
        Ember.Test.adapter = Ember.Test.QUnitAdapter.create();
     }
+
+    if (Ember.FEATURES.isEnabled('ember-testing-simple-setup')){
+      this.testingSetup = true;
+    }
   },
 
   /**
@@ -388,7 +402,7 @@ Ember.Application.reopen({
 
     this.testHelpers = {};
     for (var name in helpers) {
-      originalMethods[name] = this.helperContainer[name];
+      this.originalMethods[name] = this.helperContainer[name];
       this.testHelpers[name] = this.helperContainer[name] = helper(this, name);
       protoWrap(Ember.Test.Promise.prototype, name, helper(this, name), helpers[name].meta.wait);
     }
@@ -396,8 +410,6 @@ Ember.Application.reopen({
     for(var i = 0, l = injectHelpersCallbacks.length; i < l; i++) {
       injectHelpersCallbacks[i](this);
     }
-
-    Ember.RSVP.configure('onerror', onerror);
   },
 
   /**
@@ -414,13 +426,11 @@ Ember.Application.reopen({
   */
   removeTestHelpers: function() {
     for (var name in helpers) {
-      this.helperContainer[name] = originalMethods[name];
+      this.helperContainer[name] = this.originalMethods[name];
       delete this.testHelpers[name];
-      delete originalMethods[name];
+      delete this.originalMethods[name];
     }
-    Ember.RSVP.configure('onerror', null);
   }
-
 });
 
 // This method is no longer needed
@@ -469,7 +479,7 @@ function isolate(fn, val) {
   // Reset lastPromise for nested helpers
   Ember.Test.lastPromise = null;
 
-  value = fn.call(null, val);
+  value = fn(val);
 
   lastPromise = Ember.Test.lastPromise;
 
@@ -488,10 +498,6 @@ function isolate(fn, val) {
   }
 }
 
-function onerror(error) {
-  Ember.Test.adapter.exception(error);
-}
-
 })();
 
 
@@ -505,6 +511,19 @@ Ember.onLoad('Ember.Application', function(Application) {
       initialize: function(container, application){
         if (application.testing) {
           application.deferReadiness();
+        }
+      }
+    });
+  }
+
+  if (Ember.FEATURES.isEnabled('ember-testing-simple-setup')){
+    Application.initializer({
+      name: 'setupForTesting and injectTestHelpers when created with testing = true',
+
+      initialize: function(container, application){
+        if (application.testing && !application.testingSetup) {
+          application.setupForTesting();
+          application.injectTestHelpers();
         }
       }
     });
@@ -626,9 +645,7 @@ Test.Adapter = Ember.Object.extend({
     @param {String} error The exception to be raised.
   */
   exception: function(error) {
-    setTimeout(function() {
-      throw error;
-    });
+    throw error;
   }
 });
 
@@ -681,6 +698,23 @@ Test.onInjectHelpers(function() {
   });
 });
 
+function currentRouteName(app){
+  var appController = app.__container__.lookup('controller:application');
+
+  return get(appController, 'currentRouteName');
+}
+
+function currentPath(app){
+  var appController = app.__container__.lookup('controller:application');
+
+  return get(appController, 'currentPath');
+}
+
+function currentURL(app){
+  var router = app.__container__.lookup('router:main');
+
+  return get(router, 'location').getURL();
+}
 
 function visit(app, url) {
   if (Ember.FEATURES.isEnabled('ember-testing-lazy-routing')){
@@ -714,6 +748,19 @@ function click(app, selector, context) {
 
   Ember.run($el, 'mouseup');
   Ember.run($el, 'click');
+
+  return wait(app);
+}
+
+function triggerEvent(app, selector, context, event){
+  if (typeof method === 'undefined') {
+    event = context;
+    context = null;
+  }
+
+  var $el = findWithAssert(app, selector, context);
+
+  Ember.run($el, 'trigger', event);
 
   return wait(app);
 }
@@ -786,7 +833,7 @@ function wait(app, value) {
         if (Test.waiters && Test.waiters.any(function(waiter) {
           var context = waiter[0];
           var callback = waiter[1];
-          return !callback.apply(context);
+          return !callback.call(context);
         })) { return; }
       }
       // Stop polling
@@ -940,6 +987,84 @@ helper('findWithAssert', findWithAssert);
 */
 asyncHelper('wait', wait);
 asyncHelper('andThen', andThen);
+
+
+if (Ember.FEATURES.isEnabled('ember-testing-routing-helpers')){
+  /**
+    Returns the currently active route name.
+
+    Example:
+
+    ```
+    function validateRouteName(){
+      equal(currentRouteName(), 'some.path', "correct route was transitioned into.");
+    }
+
+    visit('/some/path').then(validateRouteName)
+
+    ```
+
+    @method currentRouteName
+    @return {Object} The name of the currently active route.
+  */
+  helper('currentRouteName', currentRouteName);
+
+  /**
+    Returns the current path.
+
+    Example:
+
+    ```
+    function validateURL(){
+      equal(currentPath(), 'some.path.index', "correct path was transitioned into.");
+    }
+
+    click('#some-link-id').then(validateURL);
+
+    ```
+
+    @method currentPath
+    @return {Object} The currently active path.
+  */
+  helper('currentPath', currentPath);
+
+  /**
+    Returns the current URL.
+
+    Example:
+
+    ```
+    function validateURL(){
+      equal(currentURL(), '/some/path', "correct URL was transitioned into.");
+    }
+
+    click('#some-link-id').then(validateURL);
+
+    ```
+
+    @method currentURL
+    @return {Object} The currently active URL.
+  */
+  helper('currentURL', currentURL);
+}
+
+if (Ember.FEATURES.isEnabled('ember-testing-triggerEvent-helper')) {
+  /**
+    Triggers the given event on the element identified by the provided selector.
+
+    Example:
+
+    ```javascript
+    triggerEvent('#some-elem-id', 'blur');
+    ```
+
+   @method triggerEvent
+   @param {String} selector jQuery selector for finding element on the DOM
+   @param {String} event The event to be triggered.
+   @return {RSVP.Promise}
+  */
+  asyncHelper('triggerEvent', triggerEvent);
+}
 
 })();
 

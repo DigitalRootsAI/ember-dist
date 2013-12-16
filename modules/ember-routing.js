@@ -776,7 +776,7 @@ define("router",
     // TODO: separate into module?
     Router.Transition = Transition;
 
-    __exports__['default'] = Router;
+    __exports__["default"] = Router;
 
 
     /**
@@ -1006,7 +1006,7 @@ define("router",
 
               if (isParam(object)) {
                 var name = recogHandler.names[0];
-                if ("" + object !== this.currentParams[name]) { return false; }
+                if (!this.currentParams || "" + object !== this.currentParams[name]) { return false; }
               } else if (handlerInfo.context !== object) {
                 return false;
               }
@@ -2174,7 +2174,7 @@ var get = Ember.get;
 */
 
 /**
-  
+
   Finds a controller instance.
 
   @for Ember
@@ -2186,17 +2186,22 @@ Ember.controllerFor = function(container, controllerName, lookupOptions) {
 };
 
 /**
-  Generates a controller automatically if none was provided.
-  The type of generated controller depends on the context.
+  Generates a controller factory
+
+  The type of the generated controller factory is derived
+  from the context. If the context is an array an array controller
+  is generated, if an object, an object controller otherwise, a basic
+  controller is generated.
+
   You can customize your generated controllers by defining
-  `App.ObjectController` and `App.ArrayController`
-  
+  `App.ObjectController` or `App.ArrayController`.
+
   @for Ember
-  @method generateController
+  @method generateControllerFactory
   @private
 */
-Ember.generateController = function(container, controllerName, context) {
-  var ControllerFactory, fullName, instance, name, factoryName, controllerType;
+Ember.generateControllerFactory = function(container, controllerName, context) {
+  var Factory, fullName, instance, name, factoryName, controllerType;
 
   if (context && Ember.isArray(context)) {
     controllerType = 'array';
@@ -2208,7 +2213,7 @@ Ember.generateController = function(container, controllerName, context) {
 
   factoryName = 'controller:' + controllerType;
 
-  ControllerFactory = container.lookupFactory(factoryName).extend({
+  Factory = container.lookupFactory(factoryName).extend({
     isGenerated: true,
     toString: function() {
       return "(generated " + controllerName + " controller)";
@@ -2217,9 +2222,27 @@ Ember.generateController = function(container, controllerName, context) {
 
   fullName = 'controller:' + controllerName;
 
-  container.register(fullName, ControllerFactory);
+  container.register(fullName,  Factory);
 
-  instance = container.lookup(fullName);
+  return Factory;
+};
+
+/**
+  Generates and instantiates a controller.
+
+  The type of the generated controller factory is derived
+  from the context. If the context is an array an array controller
+  is generated, if an object, an object controller otherwise, a basic
+  controller is generated.
+
+  @for Ember
+  @method generateController
+  @private
+*/
+Ember.generateController = function(container, controllerName, context) {
+  Ember.generateControllerFactory(container, controllerName, context);
+  var fullName = 'controller:' + controllerName;
+  var instance = container.lookup(fullName);
 
   if (get(instance, 'namespace.LOG_ACTIVE_GENERATION')) {
     Ember.Logger.info("generated -> " + fullName, { fullName: fullName });
@@ -2241,6 +2264,7 @@ Ember.generateController = function(container, controllerName, context) {
 var Router = requireModule("router")['default'];
 var get = Ember.get, set = Ember.set;
 var defineProperty = Ember.defineProperty;
+var slice = Array.prototype.slice;
 
 var DefaultView = Ember._MetamorphView;
 /**
@@ -2258,6 +2282,10 @@ Ember.Router = Ember.Object.extend(Ember.Evented, {
     this.router = this.constructor.router || this.constructor.map(Ember.K);
     this._activeViews = {};
     this._setupLocation();
+
+    if (get(this, 'namespace.LOG_TRANSITIONS_INTERNAL')) {
+      this.router.log = Ember.Logger.debug;
+    }
   },
 
   url: Ember.computed(function() {
@@ -2287,19 +2315,13 @@ Ember.Router = Ember.Object.extend(Ember.Evented, {
   didTransition: function(infos) {
     updatePaths(this);
 
-    if (Ember.FEATURES.isEnabled("ember-routing-loading-error-substates")) {
-      this._cancelLoadingEvent();
-    } else {
-      exitLegacyLoadingRoute(this);
-    }
+    this._cancelLoadingEvent();
 
     this.notifyPropertyChange('url');
 
-    if (Ember.FEATURES.isEnabled("ember-routing-didTransition-hook")) {
-      // Put this in the runloop so url will be accurate. Seems
-      // less surprising than didTransition being out of sync.
-      Ember.run.once(this, this.trigger, 'didTransition');
-    }
+    // Put this in the runloop so url will be accurate. Seems
+    // less surprising than didTransition being out of sync.
+    Ember.run.once(this, this.trigger, 'didTransition');
 
     if (get(this, 'namespace').LOG_TRANSITIONS) {
       Ember.Logger.log("Transitioned into '" + Ember.Router._routePath(infos) + "'");
@@ -2359,13 +2381,6 @@ Ember.Router = Ember.Object.extend(Ember.Evented, {
     this.router.reset();
   },
 
-  willDestroy: function(){
-    var location = get(this, 'location');
-    location.destroy();
-
-    this._super.apply(this, arguments);
-  },
-
   _lookupActiveView: function(templateName) {
     var active = this._activeViews[templateName];
     return active && active[0];
@@ -2388,17 +2403,28 @@ Ember.Router = Ember.Object.extend(Ember.Evented, {
 
   _setupLocation: function() {
     var location = get(this, 'location'),
-        rootURL = get(this, 'rootURL'),
-        options = {};
+        rootURL = get(this, 'rootURL');
+
+    if ('string' === typeof location && this.container) {
+      var resolvedLocation = this.container.lookup('location:' + location);
+
+      if ('undefined' !== typeof resolvedLocation) {
+        location = set(this, 'location', resolvedLocation);
+      } else {
+        // Allow for deprecated registration of custom location API's
+        var options = {implementation: location};
+
+        location = set(this, 'location', Ember.Location.create(options));
+      }
+    }
 
     if (typeof rootURL === 'string') {
-      options.rootURL = rootURL;
+      location.rootURL = rootURL;
     }
 
-    if ('string' === typeof location) {
-      options.implementation = location;
-      location = set(this, 'location', Ember.Location.create(options));
-    }
+    // ensure that initState is called AFTER the rootURL is set on
+    // the location instance
+    if (typeof location.initState === 'function') { location.initState(); }
   },
 
   _getHandlerFunction: function() {
@@ -2415,11 +2441,6 @@ Ember.Router = Ember.Object.extend(Ember.Evented, {
       seen[name] = true;
 
       if (!handler) {
-        if (Ember.FEATURES.isEnabled("ember-routing-loading-error-substates")) {
-        } else {
-          if (name === 'loading') { return {}; }
-        }
-
         container.register(routeName, DefaultRoute.extend());
         handler = container.lookup(routeName);
 
@@ -2465,7 +2486,7 @@ Ember.Router = Ember.Object.extend(Ember.Evented, {
 
   _doTransition: function(method, args) {
     // Normalize blank route to root URL.
-    args = [].slice.call(args);
+    args = slice.call(args);
     args[0] = args[0] || '/';
 
     var passedName = args[0], name, self = this,
@@ -2489,12 +2510,6 @@ Ember.Router = Ember.Object.extend(Ember.Evented, {
 
     var transitionPromise = this.router[method].apply(this.router, args);
 
-    // Don't schedule loading state entry if user has already aborted the transition.
-    if (Ember.FEATURES.isEnabled("ember-routing-loading-error-substates")) {
-    } else {
-      scheduleLegacyLoadingRouteEntry(this);
-    }
-
     transitionPromise.then(null, function(error) {
       if (error.name === "UnrecognizedURLError") {
         Ember.assert("The URL '" + error.message + "' did not match any routes in your application");
@@ -2509,23 +2524,17 @@ Ember.Router = Ember.Object.extend(Ember.Evented, {
 
   _scheduleLoadingEvent: function(transition, originRoute) {
     this._cancelLoadingEvent();
-    if (Ember.FEATURES.isEnabled("ember-routing-loading-error-substates")) {
-      this._loadingStateTimer = Ember.run.scheduleOnce('routerTransitions', this, '_fireLoadingEvent', transition, originRoute);
-    }
+    this._loadingStateTimer = Ember.run.scheduleOnce('routerTransitions', this, '_fireLoadingEvent', transition, originRoute);
   },
 
   _fireLoadingEvent: function(transition, originRoute) {
-    if (Ember.FEATURES.isEnabled("ember-routing-loading-error-substates")) {
-      if (!this.router.activeTransition) {
-        // Don't fire an event if we've since moved on from
-        // the transition that put us in a loading state.
-        return;
-      }
-
-      transition.trigger(true, 'loading', transition, originRoute);
-    } else {
-      enterLegacyLoadingRoute(this);
+    if (!this.router.activeTransition) {
+      // Don't fire an event if we've since moved on from
+      // the transition that put us in a loading state.
+      return;
     }
+
+    transition.trigger(true, 'loading', transition, originRoute);
   },
 
   _cancelLoadingEvent: function () {
@@ -2576,61 +2585,55 @@ var defaultActionHandlers = {
   },
 
   error: function(error, transition, originRoute) {
-    if (Ember.FEATURES.isEnabled("ember-routing-loading-error-substates")) {
+    // Attempt to find an appropriate error substate to enter.
+    var router = originRoute.router;
 
-      // Attempt to find an appropriate error substate to enter.
-      var router = originRoute.router;
-
-      var tryTopLevel = forEachRouteAbove(originRoute, transition, function(route, childRoute) {
-        var childErrorRouteName = findChildRouteName(route, childRoute, 'error');
-        if (childErrorRouteName) {
-          router.intermediateTransitionTo(childErrorRouteName, error);
-          return;
-        }
-        return true;
-      });
-
-      if (tryTopLevel) {
-        // Check for top-level error state to enter.
-        if (routeHasBeenDefined(originRoute.router, 'application_error')) {
-          router.intermediateTransitionTo('application_error', error);
-          return;
-        }
-      } else {
-        // Don't fire an assertion if we found an error substate.
+    var tryTopLevel = forEachRouteAbove(originRoute, transition, function(route, childRoute) {
+      var childErrorRouteName = findChildRouteName(route, childRoute, 'error');
+      if (childErrorRouteName) {
+        router.intermediateTransitionTo(childErrorRouteName, error);
         return;
       }
+      return true;
+    });
+
+    if (tryTopLevel) {
+      // Check for top-level error state to enter.
+      if (routeHasBeenDefined(originRoute.router, 'application_error')) {
+        router.intermediateTransitionTo('application_error', error);
+        return;
+      }
+    } else {
+      // Don't fire an assertion if we found an error substate.
+      return;
     }
 
-    Ember.Logger.assert(false, 'Error while loading route: ' + Ember.inspect(error));
+    Ember.Logger.error('Error while loading route: ' + error.stack);
   },
 
   loading: function(transition, originRoute) {
-    if (Ember.FEATURES.isEnabled("ember-routing-loading-error-substates")) {
+    // Attempt to find an appropriate loading substate to enter.
+    var router = originRoute.router;
 
-      // Attempt to find an appropriate loading substate to enter.
-      var router = originRoute.router;
+    var tryTopLevel = forEachRouteAbove(originRoute, transition, function(route, childRoute) {
+      var childLoadingRouteName = findChildRouteName(route, childRoute, 'loading');
 
-      var tryTopLevel = forEachRouteAbove(originRoute, transition, function(route, childRoute) {
-        var childLoadingRouteName = findChildRouteName(route, childRoute, 'loading');
+      if (childLoadingRouteName) {
+        router.intermediateTransitionTo(childLoadingRouteName);
+        return;
+      }
 
-        if (childLoadingRouteName) {
-          router.intermediateTransitionTo(childLoadingRouteName);
-          return;
-        }
+      // Don't bubble above pivot route.
+      if (transition.pivotHandler !== route) {
+        return true;
+      }
+    });
 
-        // Don't bubble above pivot route.
-        if (transition.pivotHandler !== route) {
-          return true;
-        }
-      });
-
-      if (tryTopLevel) {
-        // Check for top-level loading state to enter.
-        if (routeHasBeenDefined(originRoute.router, 'application_loading')) {
-          router.intermediateTransitionTo('application_loading');
-          return;
-        }
+    if (tryTopLevel) {
+      // Check for top-level loading state to enter.
+      if (routeHasBeenDefined(originRoute.router, 'application_loading')) {
+        router.intermediateTransitionTo('application_loading');
+        return;
       }
     }
   }
@@ -2692,7 +2695,7 @@ function triggerEvent(handlerInfos, ignoreFailure, args) {
   }
 
   if (!eventWasHandled && !ignoreFailure) {
-    throw new Ember.Error("Nothing handled the action '" + name + "'.");
+    throw new Ember.Error("Nothing handled the action '" + name + "'. If you did handle the action, this error can be caused by returning true from an action handler in a controller, causing the action to bubble.");
   }
 }
 
@@ -2722,41 +2725,6 @@ function updatePaths(router) {
   set(appController, 'currentRouteName', infos[infos.length - 1].name);
 }
 
-function scheduleLegacyLoadingRouteEntry(router) {
-  cancelLegacyLoadingRouteEntry(router);
-  if (router.router.activeTransition) {
-    router._legacyLoadingStateTimer = Ember.run.scheduleOnce('routerTransitions', null, enterLegacyLoadingRoute, router);
-  }
-}
-
-function enterLegacyLoadingRoute(router) {
-  var loadingRoute = router.router.getHandler('loading');
-  if (loadingRoute && !loadingRoute._loadingStateActive) {
-    if (loadingRoute.enter) { loadingRoute.enter(); }
-    if (loadingRoute.setup) { loadingRoute.setup(); }
-    loadingRoute._loadingStateActive = true;
-  }
-}
-
-function cancelLegacyLoadingRouteEntry(router) {
-  if (router._legacyLoadingStateTimer) {
-    Ember.run.cancel(router._legacyLoadingStateTimer);
-  }
-  router._legacyLoadingStateTimer = null;
-}
-
-function exitLegacyLoadingRoute(router) {
-
-  cancelLegacyLoadingRouteEntry(router);
-
-  var loadingRoute = router.router.getHandler('loading');
-
-  if (loadingRoute && loadingRoute._loadingStateActive) {
-    if (loadingRoute.exit) { loadingRoute.exit(); }
-    loadingRoute._loadingStateActive = false;
-  }
-}
-
 Ember.Router.reopenClass({
   router: null,
   map: function(callback) {
@@ -2766,10 +2734,6 @@ Ember.Router.reopenClass({
       router.callbacks = [];
       router.triggerEvent = triggerEvent;
       this.reopenClass({ router: router });
-    }
-
-    if (get(this, 'namespace.LOG_TRANSITIONS_INTERNAL')) {
-      router.log = Ember.Logger.debug;
     }
 
     var dsl = Ember.RouterDSL.map(function() {
@@ -2789,11 +2753,32 @@ Ember.Router.reopenClass({
   _routePath: function(handlerInfos) {
     var path = [];
 
+    // We have to handle coalescing resource names that
+    // are prefixed with their parent's names, e.g.
+    // ['foo', 'foo.bar.baz'] => 'foo.bar.baz', not 'foo.foo.bar.baz'
+
+    function intersectionMatches(a1, a2) {
+      for (var i = 0, len = a1.length; i < len; ++i) {
+        if (a1[i] !== a2[i]) {
+          return false;
+        }
+      }
+      return true;
+    }
+
     for (var i=1, l=handlerInfos.length; i<l; i++) {
       var name = handlerInfos[i].name,
-          nameParts = name.split(".");
+          nameParts = name.split("."),
+          oldNameParts = slice.call(path);
 
-      path.push(nameParts[nameParts.length - 1]);
+      while (oldNameParts.length) {
+        if (intersectionMatches(oldNameParts, nameParts)) {
+          break;
+        }
+        oldNameParts.shift();
+      }
+
+      path.push.apply(path, nameParts.slice(oldNameParts.length));
     }
 
     return path.join(".");
@@ -3120,6 +3105,24 @@ Ember.Route = Ember.Object.extend(Ember.ActionHandler, {
     });
     ```
 
+   Transition to a nested route
+
+   ```javascript
+   App.Router.map(function() {
+     this.resource('articles', { path: '/articles' }, function() {
+       this.route('new');
+     });
+   });
+
+   App.IndexRoute = Ember.Route.extend({
+     actions: {
+       transitionToNewArticle: function() {
+         this.transitionTo('articles.new');
+       }
+     }
+   });
+   ```
+
     Multiple Models Example
 
     ```javascript
@@ -3445,7 +3448,7 @@ Ember.Route = Ember.Object.extend(Ember.ActionHandler, {
 
     Note that for routes with dynamic segments, this hook is only
     executed when entered via the URL. If the route is entered
-    through a transition (e.g. when using the `linkTo` Handlebars
+    through a transition (e.g. when using the `link-to` Handlebars
     helper), then a model context is already provided and this hook
     is not called. Routes without dynamic segments will always
     execute the model hook.
@@ -3569,6 +3572,7 @@ Ember.Route = Ember.Object.extend(Ember.ActionHandler, {
   */
   serialize: function(model, params) {
     if (params.length < 1) { return; }
+    if (!model) { return; }
 
     var name = params[0], object = {};
 
@@ -4125,8 +4129,11 @@ Ember.onLoad('Ember.Handlebars', function(Handlebars) {
       isSimpleClick = Ember.ViewUtils.isSimpleClick;
 
   function fullRouteName(router, name) {
+    var nameWithIndex;
     if (!router.hasRoute(name)) {
-      name = name + '.index';
+      nameWithIndex = name + '.index';
+      Ember.assert(fmt("The attempt to link-to route '%@' failed (also tried '%@'). The router did not find '%@' in its possible routes: '%@'", [name, nameWithIndex, name, Ember.keys(router.router.recognizer.names).join("', '")]), router.hasRoute(nameWithIndex));
+      name = nameWithIndex;
     }
 
     return name;
@@ -4288,34 +4295,8 @@ Ember.onLoad('Ember.Handlebars', function(Handlebars) {
       this._super.apply(this, arguments);
 
       // Map desired event name to invoke function
-      var eventName = get(this, 'eventName');
+      var eventName = get(this, 'eventName'), i;
       this.on(eventName, this, this._invoke);
-
-      var helperParameters = this.parameters,
-          templateContext = helperParameters.context,
-          paths = getResolvedPaths(helperParameters),
-          length = paths.length,
-          path, i, normalizedPath;
-
-      if (Ember.FEATURES.isEnabled('link-to-non-block')) {
-        var linkTextPath = helperParameters.options.linkTextPath;
-        if (linkTextPath) {
-          normalizedPath = Ember.Handlebars.normalizePath(templateContext, linkTextPath, helperParameters.options.data);
-          this.registerObserver(normalizedPath.root, normalizedPath.path, this, this.rerender);
-        }
-      }
-
-      for(i=0; i < length; i++) {
-        path = paths[i];
-        if (null === path) {
-          // A literal value was provided, not a path, so nothing to observe.
-          continue;
-        }
-
-        normalizedPath = Ember.Handlebars.normalizePath(templateContext, path, helperParameters.options.data);
-        this.registerObserver(normalizedPath.root, normalizedPath.path, this, this._paramsChanged);
-      }
-
 
       if (Ember.FEATURES.isEnabled("query-params")) {
         var queryParams = get(this, '_potentialQueryParams') || [];
@@ -4337,6 +4318,41 @@ Ember.onLoad('Ember.Handlebars', function(Handlebars) {
       this.notifyPropertyChange('resolvedParams');
     },
 
+    /**
+      @private
+
+     This is called to setup observers that will trigger a rerender.
+
+     @method _setupPathObservers
+    **/
+    _setupPathObservers: function(){
+      var helperParameters = this.parameters,
+          linkTextPath     = helperParameters.options.linkTextPath,
+          paths = getResolvedPaths(helperParameters),
+          length = paths.length,
+          path, i, normalizedPath;
+
+      if (linkTextPath) {
+        normalizedPath = Ember.Handlebars.normalizePath(helperParameters.context, linkTextPath, helperParameters.options.data);
+        this.registerObserver(normalizedPath.root, normalizedPath.path, this, this.rerender);
+      }
+
+      for(i=0; i < length; i++) {
+        path = paths[i];
+        if (null === path) {
+          // A literal value was provided, not a path, so nothing to observe.
+          continue;
+        }
+
+        normalizedPath = Ember.Handlebars.normalizePath(helperParameters.context, path, helperParameters.options.data);
+        this.registerObserver(normalizedPath.root, normalizedPath.path, this, this._paramsChanged);
+      }
+    },
+
+    afterRender: function(){
+      this._super.apply(this, arguments);
+      this._setupPathObservers();
+    },
 
     /**
       @private
@@ -4369,7 +4385,7 @@ Ember.onLoad('Ember.Handlebars', function(Handlebars) {
       When `true` interactions with the element will not trigger route changes.
       @property disabled
     */
-    disabled: Ember.computed(function(key, value) {
+    disabled: Ember.computed(function computeLinkViewDisabled(key, value) {
       if (value !== undefined) { this.set('_isDisabled', value); }
 
       return value ? get(this, 'disabledClass') : false;
@@ -4385,7 +4401,7 @@ Ember.onLoad('Ember.Handlebars', function(Handlebars) {
 
       @property active
     **/
-    active: Ember.computed(function() {
+    active: Ember.computed(function computeLinkViewActive() {
       if (get(this, 'loading')) { return false; }
 
       var router = get(this, 'router'),
@@ -4411,7 +4427,7 @@ Ember.onLoad('Ember.Handlebars', function(Handlebars) {
 
       @property loading
     **/
-    loading: Ember.computed(function() {
+    loading: Ember.computed(function computeLinkViewLoading() {
       if (!get(this, 'routeArgs')) { return get(this, 'loadingClass'); }
     }).property('routeArgs'),
 
@@ -4437,7 +4453,7 @@ Ember.onLoad('Ember.Handlebars', function(Handlebars) {
     _invoke: function(event) {
       if (!isSimpleClick(event)) { return true; }
 
-      event.preventDefault();
+      if (this.preventDefault !== false) { event.preventDefault(); }
       if (this.bubbles === false) { event.stopPropagation(); }
 
       if (get(this, '_isDisabled')) { return false; }
@@ -4493,7 +4509,7 @@ Ember.onLoad('Ember.Handlebars', function(Handlebars) {
       @property
       @return {Array} An array with the route name and any dynamic segments
      */
-    routeArgs: Ember.computed(function() {
+    routeArgs: Ember.computed(function computeLinkViewRouteArgs() {
       var resolvedParams = get(this, 'resolvedParams').slice(0),
           router = get(this, 'router'),
           namedRoute = resolvedParams[0];
@@ -4502,8 +4518,6 @@ Ember.onLoad('Ember.Handlebars', function(Handlebars) {
 
       namedRoute = fullRouteName(router, namedRoute);
       resolvedParams[0] = namedRoute;
-
-      Ember.assert(fmt("The attempt to link-to route '%@' failed. The router did not find '%@' in its possible routes: '%@'", [namedRoute, namedRoute, Ember.keys(router.router.recognizer.names).join("', '")]), router.hasRoute(namedRoute));
 
       for (var i = 1, len = resolvedParams.length; i < len; ++i) {
         var param = resolvedParams[i];
@@ -4560,7 +4574,7 @@ Ember.onLoad('Ember.Handlebars', function(Handlebars) {
 
       @property href
     **/
-    href: Ember.computed(function() {
+    href: Ember.computed(function computeLinkViewHref() {
       if (get(this, 'tagName') !== 'a') { return; }
 
       var router = get(this, 'router'),
@@ -4620,44 +4634,44 @@ Ember.onLoad('Ember.Handlebars', function(Handlebars) {
 
     To override this option for your entire application, see
     "Overriding Application-wide Defaults".
-    
+
     ### Disabling the `link-to` helper
-    By default `{{link-to}}` is enabled. 
+    By default `{{link-to}}` is enabled.
     any passed value to `disabled` helper property will disable the `link-to` helper.
-     
+
     static use: the `disabled` option:
- 
+
     ```handlebars
     {{#link-to 'photoGallery' disabled=true}}
       Great Hamster Photos
     {{/link-to}}
     ```
-     
+
     dynamic use: the `disabledWhen` option:
-    
+
     ```handlebars
     {{#link-to 'photoGallery' disabledWhen=controller.someProperty}}
       Great Hamster Photos
     {{/link-to}}
     ```
-    
+
     any passed value to `disabled` will disable it except `undefined`.
     to ensure that only `true` disable the `link-to` helper you can
     override the global behaviour of `Ember.LinkView`.
-         
-    ```javascript  
+
+    ```javascript
     Ember.LinkView.reopen({
       disabled: Ember.computed(function(key, value) {
-        if (value !== undefined) { 
-          this.set('_isDisabled', value === true); 
+        if (value !== undefined) {
+          this.set('_isDisabled', value === true);
         }
         return value === true ? get(this, 'disabledClass') : false;
       })
     });
     ```
-     
+
     see "Overriding Application-wide Defaults" for more.
-    
+
     ### Handling `href`
     `{{link-to}}` will use your application's Router to
     fill the element's `href` property with a url that
@@ -4783,6 +4797,22 @@ Ember.onLoad('Ember.Handlebars', function(Handlebars) {
     When transitioning into the linked route, the `model` hook will
     be triggered with parameters including this passed identifier.
 
+    ### Allowing Default Action
+
+   By default the `{{link-to}}` helper prevents the default browser action
+   by calling `preventDefault()` as this sort of action bubbling is normally
+   handled internally and we do not want to take the browser to a new URL (for
+   example).
+
+   If you need to override this behavior specify `preventDefault=false` in
+   your template:
+
+    ```handlebars
+    {{#link-to 'photoGallery' aPhotoId preventDefault=false}}
+      {{aPhotoId.title}}
+    {{/link-to}}
+    ```
+
     ### Overriding attributes
     You can override any given property of the Ember.LinkView
     that is generated by the `{{link-to}}` helper by passing
@@ -4828,28 +4858,26 @@ Ember.onLoad('Ember.Handlebars', function(Handlebars) {
     @return {String} HTML string
     @see {Ember.LinkView}
   */
-  Ember.Handlebars.registerHelper('link-to', function(name) {
+  Ember.Handlebars.registerHelper('link-to', function linkToHelper(name) {
     var options = [].slice.call(arguments, -1)[0],
         params = [].slice.call(arguments, 0, -1),
         hash = options.hash;
 
     hash.disabledBinding = hash.disabledWhen;
 
-    if (Ember.FEATURES.isEnabled('link-to-non-block')) {
-      if (!options.fn) {
-        var linkTitle = params.shift();
-        var linkType = options.types.shift();
-        var context = this;
-        if (linkType === 'ID') {
-          options.linkTextPath = linkTitle;
-          options.fn = function() {
-            return Ember.Handlebars.get(context, linkTitle, options);
-          };
-        } else {
-          options.fn = function() {
-            return linkTitle;
-          };
-        }
+    if (!options.fn) {
+      var linkTitle = params.shift();
+      var linkType = options.types.shift();
+      var context = this;
+      if (linkType === 'ID') {
+        options.linkTextPath = linkTitle;
+        options.fn = function() {
+          return Ember.Handlebars.get(context, linkTitle, options);
+        };
+      } else {
+        options.fn = function() {
+          return linkTitle;
+        };
       }
     }
 
@@ -4872,7 +4900,10 @@ Ember.onLoad('Ember.Handlebars', function(Handlebars) {
     @param {Object} [context]*
     @return {String} HTML string
   */
-  Ember.Handlebars.registerHelper('linkTo', Ember.Handlebars.helpers['link-to']);
+  Ember.Handlebars.registerHelper('linkTo', function linkToHelper() {
+    Ember.warn("The 'linkTo' view helper is deprecated in favor of 'link-to'");
+    return Ember.Handlebars.helpers['link-to'].apply(this, arguments);
+  });
 });
 
 
@@ -4959,7 +4990,7 @@ Ember.onLoad('Ember.Handlebars', function(Handlebars) {
       that holds the view for this outlet
     @return {String} HTML string
   */
-  Handlebars.registerHelper('outlet', function(property, options) {
+  Handlebars.registerHelper('outlet', function outletHelper(property, options) {
     var outletSource, outletContainerClass;
 
     if (property && property.data && property.data.isRenderData) {
@@ -5064,42 +5095,59 @@ Ember.onLoad('Ember.Handlebars', function(Handlebars) {
     @param {Hash} options
     @return {String} HTML string
   */
-  Ember.Handlebars.registerHelper('render', function(name, contextString, options) {
-    Ember.assert("You must pass a template to render", arguments.length >= 2);
-    var contextProvided = arguments.length === 3,
+  Ember.Handlebars.registerHelper('render', function renderHelper(name, contextString, options) {
+    var length = arguments.length;
+
+    var contextProvided = length === 3,
         container, router, controller, view, context, lookupOptions;
 
-    if (arguments.length === 2) {
-      options = contextString;
-      contextString = undefined;
-    }
-
-    if (typeof contextString === 'string') {
-      context = Ember.Handlebars.get(options.contexts[1], contextString, options);
-      lookupOptions = { singleton: false };
-    }
-
-    name = name.replace(/\//g, '.');
-    container = options.data.keywords.controller.container;
+    container = (options || contextString).data.keywords.controller.container;
     router = container.lookup('router:main');
 
-    Ember.assert("You can only use the {{render}} helper once without a model object as its second argument, as in {{render \"post\" post}}.", contextProvided || !router || !router._lookupActiveView(name));
+    if (length === 2) {
+      // use the singleton controller
+      options = contextString;
+      contextString = undefined;
+      Ember.assert("You can only use the {{render}} helper once without a model object as its second argument, as in {{render \"post\" post}}.", !router || !router._lookupActiveView(name));
+    } else if (length === 3) {
+      // create a new controller
+      context = Ember.Handlebars.get(options.contexts[1], contextString, options);
+    } else {
+      throw Ember.Error("You must pass a templateName to render");
+    }
+
+    // # legacy namespace
+    name = name.replace(/\//g, '.');
+    // \ legacy slash as namespace support
+
 
     view = container.lookup('view:' + name) || container.lookup('view:default');
 
-    var controllerName = options.hash.controller;
+    // provide controller override
+    var controllerName = options.hash.controller || name;
+    var controllerFullName = 'controller:' + controllerName;
 
-    // Look up the controller by name, if provided.
-    if (controllerName) {
-      controller = container.lookup('controller:' + controllerName, lookupOptions);
-      Ember.assert("The controller name you supplied '" + controllerName + "' did not resolve to a controller.", !!controller);
-    } else {
-      controller = container.lookup('controller:' + name, lookupOptions) ||
-                      Ember.generateController(container, name, context);
+    if (options.hash.controller) {
+      Ember.assert("The controller name you supplied '" + controllerName + "' did not resolve to a controller.", container.has(controllerFullName));
     }
 
-    if (controller && contextProvided) {
-      controller.set('model', context);
+    var target = options.data.keywords.controller;
+
+    // choose name
+    if (length > 2) {
+      var factory = container.lookupFactory(controllerFullName) ||
+                    Ember.generateControllerFactory(container, controllerName, context);
+
+      controller = factory.create({
+        model: context,
+        target: target
+      });
+
+    } else {
+      controller = container.lookup(controllerFullName) ||
+                   Ember.generateController(container, controllerName);
+
+      controller.set('target', target);
     }
 
     var root = options.contexts[1];
@@ -5109,8 +5157,6 @@ Ember.onLoad('Ember.Handlebars', function(Handlebars) {
         controller.set('model', Ember.Handlebars.get(root, contextString, options));
       });
     }
-
-    controller.set('target', options.data.keywords.controller);
 
     options.hash.viewName = Ember.String.camelize(name);
     options.hash.template = container.lookup('template:' + name);
@@ -5122,7 +5168,6 @@ Ember.onLoad('Ember.Handlebars', function(Handlebars) {
 
     Ember.Handlebars.helpers.view.call(this, view, options);
   });
-
 });
 
 })();
@@ -5169,7 +5214,7 @@ Ember.onLoad('Ember.Handlebars', function(Handlebars) {
       if (POINTER_EVENT_TYPE_REGEX.test(event.type)) {
         return isSimpleClick(event);
       } else {
-        allowedKeys = [];
+        allowedKeys = '';
       }
     }
 
@@ -5193,10 +5238,12 @@ Ember.onLoad('Ember.Handlebars', function(Handlebars) {
 
     ActionHelper.registeredActions[actionId] = {
       eventName: options.eventName,
-      handler: function(event) {
+      handler: function handleRegisteredAction(event) {
         if (!isAllowedEvent(event, allowedKeys)) { return true; }
 
-        event.preventDefault();
+        if (options.preventDefault !== false) {
+          event.preventDefault();
+        }
 
         if (options.bubbles === false) {
           event.stopPropagation();
@@ -5210,7 +5257,7 @@ Ember.onLoad('Ember.Handlebars', function(Handlebars) {
           target = target.root;
         }
 
-        Ember.run(function() {
+        Ember.run(function runRegisteredAction() {
           if (target.send) {
             target.send.apply(target, args(options.parameters, actionName));
           } else {
@@ -5253,8 +5300,7 @@ Ember.onLoad('Ember.Handlebars', function(Handlebars) {
     App.ApplicationController = Ember.Controller.extend({
       actions: {
         anActionName: function() {
-          
-        }  
+        }
       }
     });
     ```
@@ -5285,9 +5331,17 @@ Ember.onLoad('Ember.Handlebars', function(Handlebars) {
 
     Events triggered through the action helper will automatically have
     `.preventDefault()` called on them. You do not need to do so in your event
-    handlers.
+    handlers. If you need to allow event propagation (to handle file inputs for
+    example) you can supply the `preventDefault=false` option to the `{{action}}` helper:
 
-    To also disable bubbling, pass `bubbles=false` to the helper:
+    ```handlebars
+    <div {{action "sayHello" preventDefault=false}}>
+      <input type="file" />
+      <input type="checkbox" />
+    </div>
+    ```
+
+    To disable bubbling, pass `bubbles=false` to the helper:
 
     ```handlebars
     <button {{action 'edit' post bubbles=false}}>Edit</button>
@@ -5389,7 +5443,7 @@ Ember.onLoad('Ember.Handlebars', function(Handlebars) {
     @param {Object} [context]*
     @param {Hash} options
   */
-  EmberHandlebars.registerHelper('action', function(actionName) {
+  EmberHandlebars.registerHelper('action', function actionHelper(actionName) {
     var options = arguments[arguments.length - 1],
         contexts = a_slice.call(arguments, 1, -1);
 
@@ -5420,6 +5474,7 @@ Ember.onLoad('Ember.Handlebars', function(Handlebars) {
 
     action.target = { root: root, target: target, options: options };
     action.bubbles = hash.bubbles;
+    action.preventDefault = hash.preventDefault;
 
     var actionId = ActionHelper.registerAction(actionName, action, hash.allowedKeys);
     return new SafeString('data-ember-action="' + actionId + '"');
@@ -5809,6 +5864,8 @@ Ember.Location = {
     @param {Object} implementation of the `location` API
   */
   registerImplementation: function(name, implementation) {
+    Ember.deprecate('Using the Ember.Location.registerImplementation is no longer supported. Register your custom location implementation with the container instead.', false);
+
     this.implementations[name] = implementation;
   },
 
@@ -5838,6 +5895,7 @@ var get = Ember.get, set = Ember.set;
   @extends Ember.Object
 */
 Ember.NoneLocation = Ember.Object.extend({
+  implementation: 'none',
   path: '',
 
   /**
@@ -5913,8 +5971,6 @@ Ember.NoneLocation = Ember.Object.extend({
   }
 });
 
-Ember.Location.registerImplementation('none', Ember.NoneLocation);
-
 })();
 
 
@@ -5937,6 +5993,7 @@ var get = Ember.get, set = Ember.set;
   @extends Ember.Object
 */
 Ember.HashLocation = Ember.Object.extend({
+  implementation: 'hash',
 
   init: function() {
     set(this, 'location', get(this, 'location') || window.location);
@@ -6050,8 +6107,6 @@ Ember.HashLocation = Ember.Object.extend({
   }
 });
 
-Ember.Location.registerImplementation('hash', Ember.HashLocation);
-
 })();
 
 
@@ -6075,10 +6130,10 @@ var supportsHistoryState = window.history && 'state' in window.history;
   @extends Ember.Object
 */
 Ember.HistoryLocation = Ember.Object.extend({
+  implementation: 'history',
 
   init: function() {
     set(this, 'location', get(this, 'location') || window.location);
-    this.initState();
   },
 
   /**
@@ -6273,8 +6328,6 @@ Ember.HistoryLocation = Ember.Object.extend({
     Ember.$(window).off('popstate.ember-location-'+guid);
   }
 });
-
-Ember.Location.registerImplementation('history', Ember.HistoryLocation);
 
 })();
 

@@ -1,17 +1,17 @@
-// ==========================================================================
-// Project:   Ember - JavaScript Application Framework
-// Copyright: Copyright 2011-2013 Tilde Inc. and contributors
-//            Portions Copyright 2006-2011 Strobe Inc.
-//            Portions Copyright 2008-2011 Apple Inc. All rights reserved.
-// License:   Licensed under MIT license
-//            See https://raw.github.com/emberjs/ember.js/master/LICENSE
-// ==========================================================================
+/*!
+ * @overview  Ember - JavaScript Application Framework
+ * @copyright Copyright 2011-2013 Tilde Inc. and contributors
+ *            Portions Copyright 2006-2011 Strobe Inc.
+ *            Portions Copyright 2008-2011 Apple Inc. All rights reserved.
+ * @license   Licensed under MIT license
+ *            See https://raw.github.com/emberjs/ember.js/master/LICENSE
+ */
 
 
- // Version: 1.3.0-beta.1+canary.0169d950
+ // Version: 1.4.0-beta.1+canary.9d11fb00
 
 (function() {
-var define, requireModule;
+var define, requireModule, require, requirejs;
 
 (function() {
   var registry = {}, seen = {};
@@ -20,32 +20,48 @@ var define, requireModule;
     registry[name] = { deps: deps, callback: callback };
   };
 
-  requireModule = function(name) {
+  requirejs = require = requireModule = function(name) {
+  requirejs._eak_seen = registry;
+
     if (seen[name]) { return seen[name]; }
     seen[name] = {};
 
-    var mod, deps, callback, reified, exports;
-
-    mod = registry[name];
-
-    if (!mod) {
-      throw new Error("Module '" + name + "' not found.");
+    if (!registry[name]) {
+      throw new Error("Could not find module " + name);
     }
 
-    deps = mod.deps;
-    callback = mod.callback;
-    reified = [];
+    var mod = registry[name],
+        deps = mod.deps,
+        callback = mod.callback,
+        reified = [],
+        exports;
 
     for (var i=0, l=deps.length; i<l; i++) {
       if (deps[i] === 'exports') {
         reified.push(exports = {});
       } else {
-        reified.push(requireModule(deps[i]));
+        reified.push(requireModule(resolve(deps[i])));
       }
     }
 
     var value = callback.apply(this, reified);
     return seen[name] = exports || value;
+
+    function resolve(child) {
+      if (child.charAt(0) !== '.') { return child; }
+      var parts = child.split("/");
+      var parentBase = name.split("/").slice(0, -1);
+
+      for (var i=0, l=parts.length; i<l; i++) {
+        var part = parts[i];
+
+        if (part === '..') { parentBase.pop(); }
+        else if (part === '.') { continue; }
+        else { parentBase.push(part); }
+      }
+
+      return parentBase.join("/");
+    }
   };
 })();
 (function() {
@@ -73,7 +89,7 @@ var define, requireModule;
 
   @class Ember
   @static
-  @version 1.3.0-beta.1+canary.0169d950
+  @version 1.4.0-beta.1+canary.9d11fb00
 */
 
 if ('undefined' === typeof Ember) {
@@ -100,10 +116,10 @@ Ember.toString = function() { return "Ember"; };
 /**
   @property VERSION
   @type String
-  @default '1.3.0-beta.1+canary.0169d950'
+  @default '1.4.0-beta.1+canary.9d11fb00'
   @final
 */
-Ember.VERSION = '1.3.0-beta.1+canary.0169d950';
+Ember.VERSION = '1.4.0-beta.1+canary.9d11fb00';
 
 /**
   Standard environmental variables. You can define these in a global `ENV`
@@ -609,6 +625,16 @@ var errorProps = ['description', 'fileName', 'lineNumber', 'message', 'name', 'n
 Ember.Error = function() {
   var tmp = Error.apply(this, arguments);
 
+  // Adds a `stack` property to the given error object that will yield the
+  // stack trace at the time captureStackTrace was called.
+  // When collecting the stack trace all frames above the topmost call
+  // to this function, including that call, will be left out of the
+  // stack trace.
+  // This is useful because we can hide Ember implementation details
+  // that are not very helpful for the user.
+  if (Error.captureStackTrace) {
+    Error.captureStackTrace(this, Ember.Error);
+  }
   // Unfortunately errors are not enumerable in Chrome (at least), so `for prop in tmp` doesn't work.
   for (var idx = 0; idx < errorProps.length; idx++) {
     this[errorProps[idx]] = tmp[errorProps[idx]];
@@ -1334,6 +1360,41 @@ Ember.typeOf = function(item) {
   return ret;
 };
 
+/**
+  Convenience method to inspect an object. This method will attempt to
+  convert the object into a useful string description.
+
+  It is a pretty simple implementation. If you want something more robust,
+  use something like JSDump: https://github.com/NV/jsDump
+
+  @method inspect
+  @for Ember
+  @param {Object} obj The object you want to inspect.
+  @return {String} A description of the object
+*/
+Ember.inspect = function(obj) {
+  var type = Ember.typeOf(obj);
+  if (type === 'array') {
+    return '[' + obj + ']';
+  }
+  if (type !== 'object') {
+    return obj + '';
+  }
+
+  var v, ret = [];
+  for(var key in obj) {
+    if (obj.hasOwnProperty(key)) {
+      v = obj[key];
+      if (v === 'toString') { continue; } // ignore useless items
+      if (Ember.typeOf(v) === 'function') { v = "function() { ... }"; }
+      ret.push(key + ": " + v);
+    }
+  }
+  return "{" + ret.join(", ") + "}";
+};
+
+
+
 })();
 
 
@@ -1479,6 +1540,8 @@ Ember.Instrumentation.instrument = function(name, payload, callback, binding) {
 
   @param {String} [pattern] Namespaced event name.
   @param {Object} [object] Before and After hooks.
+
+  @return {Subscriber}
 */
 Ember.Instrumentation.subscribe = function(pattern, object) {
   var paths = pattern.split("."), path, regex = [];
@@ -1742,7 +1805,7 @@ var normalizeTuple = Ember.normalizeTuple = function(target, path) {
   }
 
   // must return some kind of path to be valid else other things will break.
-  if (!path || path.length===0) throw new Ember.Error('Invalid Path');
+  if (!path || path.length===0) throw new Ember.Error('Path cannot be empty');
 
   return [ target, path ];
 };
@@ -2600,7 +2663,7 @@ function setPath(root, path, value, tolerant) {
   keyName = path.slice(path.lastIndexOf('.') + 1);
 
   // get the first part of the part
-  path    = path.slice(0, path.length-(keyName.length+1));
+  path    = (path === keyName) ? keyName : path.slice(0, path.length-(keyName.length+1));
 
   // unless the path is this, look up the first part to
   // get the root
@@ -3024,7 +3087,7 @@ MapWithDefault.prototype.copy = function() {
 
 (function() {
 function consoleMethod(name) {
-  var consoleObj;
+  var consoleObj, logToConsole;
   if (Ember.imports.console) {
     consoleObj = Ember.imports.console;
   } else if (typeof console !== 'undefined') {
@@ -3036,9 +3099,11 @@ function consoleMethod(name) {
   if (method) {
     // Older IE doesn't support apply, but Chrome needs it
     if (method.apply) {
-      return function() {
+      logToConsole = function() {
         method.apply(consoleObj, arguments);
       };
+      logToConsole.displayName = 'console.' + name;
+      return logToConsole;
     } else {
       return function() {
         var message = Array.prototype.join.call(arguments, ', ');
@@ -3784,20 +3849,20 @@ Ember.finishChains = function(obj) {
 
 
 (function() {
-/**
-  @module ember-metal
-*/
-
 if (Ember.FEATURES.isEnabled('propertyBraceExpansion')) {
+  /**
+    @module ember-metal
+  */
+
   var forEach = Ember.EnumerableUtils.forEach,
-      IS_BRACE_EXPANSION = /^\{([^.]*)\}$/;
+      BRACE_EXPANSION = /^((?:[^\.]*\.)*)\{(.*)\}$/;
 
   /**
     Expands `pattern`, invoking `callback` for each expansion.
 
     The only pattern supported is brace-expansion, anything else will be passed
-    once to `callback` directly.  Furthermore, brace-expansion is only applied to
-    the entire pattern, not to substrings.
+    once to `callback` directly. Brace expansion can only appear at the end of a
+    pattern, for example as the last item in a chain.
 
     Example
     ```js
@@ -3805,7 +3870,8 @@ if (Ember.FEATURES.isEnabled('propertyBraceExpansion')) {
 
     Ember.expandProperties('foo.bar', echo);        //=> 'foo.bar'
     Ember.expandProperties('{foo,bar}', echo);      //=> 'foo', 'bar'
-    Ember.expandProperties('foo.{bar,baz}', echo);  //=> 'foo.{bar,baz}'
+    Ember.expandProperties('foo.{bar,baz}', echo);  //=> 'foo.bar', 'foo.baz'
+    Ember.expandProperties('{foo,bar}.baz', echo);  //=> '{foo,bar}.baz'
     ```
 
     @method
@@ -3815,12 +3881,18 @@ if (Ember.FEATURES.isEnabled('propertyBraceExpansion')) {
     expansion, and is passed the expansion.
   */
   Ember.expandProperties = function (pattern, callback) {
-    if (IS_BRACE_EXPANSION.test(pattern)) {
-      forEach(pattern.substring(1, pattern.length-1).split(','), callback);
-      return;
-    }
+    var match, prefix, list;
 
-    callback(pattern);
+    if (match = BRACE_EXPANSION.exec(pattern)) {
+      prefix = match[1];
+      list = match[2];
+
+      forEach(list.split(','), function (suffix) {
+        callback(prefix + suffix);
+      });
+    } else {
+      callback(pattern);
+    }
   };
 }
 
@@ -3891,10 +3963,6 @@ var metaFor = Ember.meta, // utils.js
     generateGuid = Ember.generateGuid,
     IS_PATH = /[\.\*]/;
 
-if (Ember.FEATURES.isEnabled('propertyBraceExpansion')) {
-  var expandProperties = Ember.expandProperties;
-}
-
 // returns true if the passed path is just a keyName
 function isKeyName(path) {
   return path==='*' || !IS_PATH.test(path);
@@ -3918,20 +3986,10 @@ Ember.watch = function(obj, _keyPath) {
   // can't watch length on Array - it is special...
   if (_keyPath === 'length' && typeOf(obj) === 'array') { return; }
 
-  if (Ember.FEATURES.isEnabled('propertyBraceExpansion')) {
-    expandProperties(_keyPath, function (keyPath) {
-      if (isKeyName(keyPath)) {
-        watchKey(obj, keyPath);
-      } else {
-        watchPath(obj, keyPath);
-      }
-    });
+  if (isKeyName(_keyPath)) {
+    watchKey(obj, _keyPath);
   } else {
-    if (isKeyName(_keyPath)) {
-      watchKey(obj, _keyPath);
-    } else {
-      watchPath(obj, _keyPath);
-    }
+    watchPath(obj, _keyPath);
   }
 };
 
@@ -3946,20 +4004,10 @@ Ember.unwatch = function(obj, _keyPath) {
   // can't watch length on Array - it is special...
   if (_keyPath === 'length' && typeOf(obj) === 'array') { return; }
 
-  if (Ember.FEATURES.isEnabled('propertyBraceExpansion')) {
-    expandProperties(_keyPath, function (keyPath) {
-      if (isKeyName(keyPath)) {
-        unwatchKey(obj, keyPath);
-      } else {
-        unwatchPath(obj, keyPath);
-      }
-    });
+  if (isKeyName(_keyPath)) {
+    unwatchKey(obj, _keyPath);
   } else {
-    if (isKeyName(_keyPath)) {
-      unwatchKey(obj, _keyPath);
-    } else {
-      unwatchPath(obj, _keyPath);
-    }
+    unwatchPath(obj, _keyPath);
   }
 };
 
@@ -4308,21 +4356,21 @@ ComputedPropertyPrototype.readOnly = function(readOnly) {
   @chainable
 */
 ComputedPropertyPrototype.property = function() {
-  var addArg;
+  var args;
 
   if (Ember.FEATURES.isEnabled('propertyBraceExpansion')) {
-    // Slightly odd setup to keep JSHint happy
-    addArg = function(arg) { args.push(arg); };
+    var addArg = function (property) {
+      args.push(property); 
+    };
+
+    args = [];
+    for (var i = 0, l = arguments.length; i < l; i++) {
+      expandProperties(arguments[i], addArg);
+    }
+  } else {
+    args = a_slice.call(arguments);
   }
 
-  var args = [];
-  for (var i = 0, l = arguments.length; i < l; i++) {
-    if (Ember.FEATURES.isEnabled('propertyBraceExpansion')) {
-      expandProperties(arguments[i], addArg);
-    } else {
-      args.push(arguments[i]);
-    }
-  }
   this._dependentKeys = args;
   return this;
 };
@@ -4450,7 +4498,7 @@ ComputedPropertyPrototype.set = function(obj, keyName, value) {
       funcArgLength, cachedValue, ret;
 
   if (this._readOnly) {
-    throw new Ember.Error('Cannot Set: ' + keyName + ' on: ' + obj.toString() );
+    throw new Ember.Error('Cannot Set: ' + keyName + ' on: ' + Ember.inspect(obj));
   }
 
   this._suspended = obj;
@@ -4639,13 +4687,13 @@ registerComputed('empty', function(dependentKey) {
   Example
 
   ```javascript
-  var Hampster = Ember.Object.extend({
+  var Hamster = Ember.Object.extend({
     hasStuff: Ember.computed.notEmpty('backpack')
   });
-  var hampster = Hampster.create({backpack: ['Food', 'Sleeping Bag', 'Tent']});
-  hampster.get('hasStuff'); // true
-  hampster.get('backpack').clear(); // []
-  hampster.get('hasStuff'); // false
+  var hamster = Hamster.create({backpack: ['Food', 'Sleeping Bag', 'Tent']});
+  hamster.get('hasStuff'); // true
+  hamster.get('backpack').clear(); // []
+  hamster.get('hasStuff'); // false
   ```
 
   @method computed.notEmpty
@@ -4666,15 +4714,15 @@ registerComputed('notEmpty', function(dependentKey) {
   Example
 
   ```javascript
-  var Hampster = Ember.Object.extend({
+  var Hamster = Ember.Object.extend({
     isHungry: Ember.computed.none('food')
   });
-  var hampster = Hampster.create();
-  hampster.get('isHungry'); // true
-  hampster.set('food', 'Banana');
-  hampster.get('isHungry'); // false
-  hampster.set('food', null);
-  hampster.get('isHungry'); // true
+  var hamster = Hamster.create();
+  hamster.get('isHungry'); // true
+  hamster.set('food', 'Banana');
+  hamster.get('isHungry'); // false
+  hamster.set('food', null);
+  hamster.get('isHungry'); // true
   ```
 
   @method computed.none
@@ -4718,17 +4766,17 @@ registerComputed('not', function(dependentKey) {
   into a boolean value.
 
   ```javascript
-  var Hampster = Ember.Object.extend({
+  var Hamster = Ember.Object.extend({
     hasBananas: Ember.computed.bool('numBananas')
   });
-  var hampster = Hampster.create();
-  hampster.get('hasBananas'); // false
-  hampster.set('numBananas', 0);
-  hampster.get('hasBananas'); // false
-  hampster.set('numBananas', 1);
-  hampster.get('hasBananas'); // true
-  hampster.set('numBananas', null);
-  hampster.get('hasBananas'); // false
+  var hamster = Hamster.create();
+  hamster.get('hasBananas'); // false
+  hamster.set('numBananas', 0);
+  hamster.get('hasBananas'); // false
+  hamster.set('numBananas', 1);
+  hamster.get('hasBananas'); // true
+  hamster.set('numBananas', null);
+  hamster.get('hasBananas'); // false
   ```
 
   @method computed.bool
@@ -4756,7 +4804,7 @@ registerComputed('bool', function(dependentKey) {
   user.get('hasValidEmail'); // false
   user.set('email', '');
   user.get('hasValidEmail'); // false
-  user.set('email', 'ember_hampster@example.com');
+  user.set('email', 'ember_hamster@example.com');
   user.get('hasValidEmail'); // true
   ```
 
@@ -4769,7 +4817,7 @@ registerComputed('bool', function(dependentKey) {
 */
 registerComputed('match', function(dependentKey, regexp) {
   var value = get(this, dependentKey);
-  return typeof value === 'string' ? !!value.match(regexp) : false;
+  return typeof value === 'string' ? regexp.test(value) : false;
 });
 
 /**
@@ -4779,15 +4827,15 @@ registerComputed('match', function(dependentKey, regexp) {
   Example
 
   ```javascript
-  var Hampster = Ember.Object.extend({
+  var Hamster = Ember.Object.extend({
     napTime: Ember.computed.equal('state', 'sleepy')
   });
-  var hampster = Hampster.create();
-  hampster.get('napTime'); // false
-  hampster.set('state', 'sleepy');
-  hampster.get('napTime'); // true
-  hampster.set('state', 'hungry');
-  hampster.get('napTime'); // false
+  var hamster = Hamster.create();
+  hamster.get('napTime'); // false
+  hamster.set('state', 'sleepy');
+  hamster.get('napTime'); // true
+  hamster.set('state', 'hungry');
+  hamster.get('napTime'); // false
   ```
 
   @method computed.equal
@@ -4808,15 +4856,15 @@ registerComputed('equal', function(dependentKey, value) {
   Example
 
   ```javascript
-  var Hampster = Ember.Object.extend({
+  var Hamster = Ember.Object.extend({
     hasTooManyBananas: Ember.computed.gt('numBananas', 10)
   });
-  var hampster = Hampster.create();
-  hampster.get('hasTooManyBananas'); // false
-  hampster.set('numBananas', 3);
-  hampster.get('hasTooManyBananas'); // false
-  hampster.set('numBananas', 11);
-  hampster.get('hasTooManyBananas'); // true
+  var hamster = Hamster.create();
+  hamster.get('hasTooManyBananas'); // false
+  hamster.set('numBananas', 3);
+  hamster.get('hasTooManyBananas'); // false
+  hamster.set('numBananas', 11);
+  hamster.get('hasTooManyBananas'); // true
   ```
 
   @method computed.gt
@@ -4837,15 +4885,15 @@ registerComputed('gt', function(dependentKey, value) {
   Example
 
   ```javascript
-  var Hampster = Ember.Object.extend({
+  var Hamster = Ember.Object.extend({
     hasTooManyBananas: Ember.computed.gte('numBananas', 10)
   });
-  var hampster = Hampster.create();
-  hampster.get('hasTooManyBananas'); // false
-  hampster.set('numBananas', 3);
-  hampster.get('hasTooManyBananas'); // false
-  hampster.set('numBananas', 10);
-  hampster.get('hasTooManyBananas'); // true
+  var hamster = Hamster.create();
+  hamster.get('hasTooManyBananas'); // false
+  hamster.set('numBananas', 3);
+  hamster.get('hasTooManyBananas'); // false
+  hamster.set('numBananas', 10);
+  hamster.get('hasTooManyBananas'); // true
   ```
 
   @method computed.gte
@@ -4866,15 +4914,15 @@ registerComputed('gte', function(dependentKey, value) {
   Example
 
   ```javascript
-  var Hampster = Ember.Object.extend({
+  var Hamster = Ember.Object.extend({
     needsMoreBananas: Ember.computed.lt('numBananas', 3)
   });
-  var hampster = Hampster.create();
-  hampster.get('needsMoreBananas'); // true
-  hampster.set('numBananas', 3);
-  hampster.get('needsMoreBananas'); // false
-  hampster.set('numBananas', 2);
-  hampster.get('needsMoreBananas'); // true
+  var hamster = Hamster.create();
+  hamster.get('needsMoreBananas'); // true
+  hamster.set('numBananas', 3);
+  hamster.get('needsMoreBananas'); // false
+  hamster.set('numBananas', 2);
+  hamster.get('needsMoreBananas'); // true
   ```
 
   @method computed.lt
@@ -4895,15 +4943,15 @@ registerComputed('lt', function(dependentKey, value) {
   Example
 
   ```javascript
-  var Hampster = Ember.Object.extend({
+  var Hamster = Ember.Object.extend({
     needsMoreBananas: Ember.computed.lte('numBananas', 3)
   });
-  var hampster = Hampster.create();
-  hampster.get('needsMoreBananas'); // true
-  hampster.set('numBananas', 5);
-  hampster.get('needsMoreBananas'); // false
-  hampster.set('numBananas', 3);
-  hampster.get('needsMoreBananas'); // true
+  var hamster = Hamster.create();
+  hamster.get('needsMoreBananas'); // true
+  hamster.set('numBananas', 5);
+  hamster.get('needsMoreBananas'); // false
+  hamster.set('numBananas', 3);
+  hamster.get('needsMoreBananas'); // true
   ```
 
   @method computed.lte
@@ -4924,15 +4972,15 @@ registerComputed('lte', function(dependentKey, value) {
   Example
 
   ```javascript
-  var Hampster = Ember.Object.extend({
+  var Hamster = Ember.Object.extend({
     readyForCamp: Ember.computed.and('hasTent', 'hasBackpack')
   });
-  var hampster = Hampster.create();
-  hampster.get('readyForCamp'); // false
-  hampster.set('hasTent', true);
-  hampster.get('readyForCamp'); // false
-  hampster.set('hasBackpack', true);
-  hampster.get('readyForCamp'); // true
+  var hamster = Hamster.create();
+  hamster.get('readyForCamp'); // false
+  hamster.set('hasTent', true);
+  hamster.get('readyForCamp'); // false
+  hamster.set('hasBackpack', true);
+  hamster.get('readyForCamp'); // true
   ```
 
   @method computed.and
@@ -4957,13 +5005,13 @@ registerComputedWithProperties('and', function(properties) {
   Example
 
   ```javascript
-  var Hampster = Ember.Object.extend({
+  var Hamster = Ember.Object.extend({
     readyForRain: Ember.computed.or('hasJacket', 'hasUmbrella')
   });
-  var hampster = Hampster.create();
-  hampster.get('readyForRain'); // false
-  hampster.set('hasJacket', true);
-  hampster.get('readyForRain'); // true
+  var hamster = Hamster.create();
+  hamster.get('readyForRain'); // false
+  hamster.set('hasJacket', true);
+  hamster.get('readyForRain'); // true
   ```
 
   @method computed.or
@@ -4988,13 +5036,13 @@ registerComputedWithProperties('or', function(properties) {
   Example
 
   ```javascript
-  var Hampster = Ember.Object.extend({
+  var Hamster = Ember.Object.extend({
     hasClothes: Ember.computed.any('hat', 'shirt')
   });
-  var hampster = Hampster.create();
-  hampster.get('hasClothes'); // null
-  hampster.set('shirt', 'Hawaiian Shirt');
-  hampster.get('hasClothes'); // 'Hawaiian Shirt'
+  var hamster = Hamster.create();
+  hamster.get('hasClothes'); // null
+  hamster.set('shirt', 'Hawaiian Shirt');
+  hamster.get('hasClothes'); // 'Hawaiian Shirt'
   ```
 
   @method computed.any
@@ -5019,14 +5067,14 @@ registerComputedWithProperties('any', function(properties) {
   Example
 
   ```javascript
-  var Hampster = Ember.Object.extend({
+  var Hamster = Ember.Object.extend({
     clothes: Ember.computed.map('hat', 'shirt')
   });
-  var hampster = Hampster.create();
-  hampster.get('clothes'); // [null, null]
-  hampster.set('hat', 'Camp Hat');
-  hampster.set('shirt', 'Camp Shirt');
-  hampster.get('clothes'); // ['Camp Hat', 'Camp Shirt']
+  var hamster = Hamster.create();
+  hamster.get('clothes'); // [null, null]
+  hamster.set('hat', 'Camp Hat');
+  hamster.set('shirt', 'Camp Shirt');
+  hamster.get('clothes'); // ['Camp Hat', 'Camp Shirt']
   ```
 
   @method computed.map
@@ -5127,7 +5175,51 @@ Ember.computed.oneWay = function(dependentKey) {
   });
 };
 
+if (Ember.FEATURES.isEnabled('computed-read-only')) {
+/**
+  Where `computed.oneWay` provides oneWay bindings, `computed.readOnly` provides
+  a readOnly one way binding. Very often when using `computed.oneWay` one does
+  not also want changes to propogate back up, as they will replace the value.
 
+  This prevents the reverse flow, and also throws an exception when it occurs.
+
+  Example
+
+  ```javascript
+  User = Ember.Object.extend({
+    firstName: null,
+    lastName: null,
+    nickName: Ember.computed.readOnly('firstName')
+  });
+
+  user = User.create({
+    firstName: 'Teddy',
+    lastName:  'Zeenny'
+  });
+
+  user.get('nickName');
+  # 'Teddy'
+
+  user.set('nickName', 'TeddyBear');
+  # throws Exception
+  # throw new Ember.Error('Cannot Set: nickName on: <User:ember27288>' );`
+
+  user.get('firstName');
+  # 'Teddy'
+  ```
+
+  @method computed.readOnly
+  @for Ember
+  @param {String} dependentKey
+  @return {Ember.ComputedProperty} computed property which creates a
+  one way computed property to the original value for property.
+*/
+Ember.computed.readOnly = function(dependentKey) {
+  return Ember.computed(dependentKey, function() {
+    return get(this, dependentKey);
+  }).readOnly();
+};
+}
 /**
   A computed property that acts like a standard getter and setter,
   but returns the value at the provided `defaultPath` if the
@@ -5136,14 +5228,14 @@ Ember.computed.oneWay = function(dependentKey) {
   Example
 
   ```javascript
-  var Hampster = Ember.Object.extend({
+  var Hamster = Ember.Object.extend({
     wishList: Ember.computed.defaultTo('favoriteFood')
   });
-  var hampster = Hampster.create({favoriteFood: 'Banana'});
-  hampster.get('wishList'); // 'Banana'
-  hampster.set('wishList', 'More Unit Tests');
-  hampster.get('wishList'); // 'More Unit Tests'
-  hampster.get('favoriteFood'); // 'Banana'
+  var hamster = Hamster.create({favoriteFood: 'Banana'});
+  hamster.get('wishList'); // 'Banana'
+  hamster.set('wishList', 'More Unit Tests');
+  hamster.get('wishList'); // 'More Unit Tests'
+  hamster.get('favoriteFood'); // 'Banana'
   ```
 
   @method computed.defaultTo
@@ -5175,10 +5267,6 @@ Ember.computed.defaultTo = function(defaultPath) {
 var AFTER_OBSERVERS = ':change',
     BEFORE_OBSERVERS = ':before';
 
-if (Ember.FEATURES.isEnabled('propertyBraceExpansion')) {
-  var expandProperties = Ember.expandProperties;
-}
-
 function changeEvent(keyName) {
   return keyName+AFTER_OBSERVERS;
 }
@@ -5195,15 +5283,8 @@ function beforeEvent(keyName) {
   @param {Function|String} [method]
 */
 Ember.addObserver = function(obj, _path, target, method) {
-  if (Ember.FEATURES.isEnabled('propertyBraceExpansion')) {
-    expandProperties(_path, function (path) {
-      Ember.addListener(obj, changeEvent(path), target, method);
-      Ember.watch(obj, path);
-    });
-  } else {
-    Ember.addListener(obj, changeEvent(_path), target, method);
-    Ember.watch(obj, _path);
-  }
+  Ember.addListener(obj, changeEvent(_path), target, method);
+  Ember.watch(obj, _path);
 
   return this;
 };
@@ -5220,15 +5301,9 @@ Ember.observersFor = function(obj, path) {
   @param {Function|String} [method]
 */
 Ember.removeObserver = function(obj, _path, target, method) {
-  if (Ember.FEATURES.isEnabled('propertyBraceExpansion')) {
-    expandProperties(_path, function (path) {
-      Ember.unwatch(obj, path);
-      Ember.removeListener(obj, changeEvent(path), target, method);
-    });
-  } else {
-    Ember.unwatch(obj, _path);
-    Ember.removeListener(obj, changeEvent(_path), target, method);
-  }
+  Ember.unwatch(obj, _path);
+  Ember.removeListener(obj, changeEvent(_path), target, method);
+
   return this;
 };
 
@@ -5240,15 +5315,9 @@ Ember.removeObserver = function(obj, _path, target, method) {
   @param {Function|String} [method]
 */
 Ember.addBeforeObserver = function(obj, _path, target, method) {
-  if (Ember.FEATURES.isEnabled('propertyBraceExpansion')) {
-    expandProperties(_path, function (path) {
-      Ember.addListener(obj, beforeEvent(path), target, method);
-      Ember.watch(obj, path);
-    });
-  } else {
-    Ember.addListener(obj, beforeEvent(_path), target, method);
-    Ember.watch(obj, _path);
-  }
+  Ember.addListener(obj, beforeEvent(_path), target, method);
+  Ember.watch(obj, _path);
+
   return this;
 };
 
@@ -5288,15 +5357,9 @@ Ember.beforeObserversFor = function(obj, path) {
   @param {Function|String} [method]
 */
 Ember.removeBeforeObserver = function(obj, _path, target, method) {
-  if (Ember.FEATURES.isEnabled('propertyBraceExpansion')) {
-    expandProperties(_path, function (path) {
-      Ember.unwatch(obj, path);
-      Ember.removeListener(obj, beforeEvent(path), target, method);
-    });
-  } else {
-    Ember.unwatch(obj, _path);
-    Ember.removeListener(obj, beforeEvent(_path), target, method);
-  }
+  Ember.unwatch(obj, _path);
+  Ember.removeListener(obj, beforeEvent(_path), target, method);
+
   return this;
 };
 
@@ -5305,7 +5368,7 @@ Ember.removeBeforeObserver = function(obj, _path, target, method) {
 
 
 (function() {
-define("backburner/queue",
+define("backburner/queue", 
   ["exports"],
   function(__exports__) {
     "use strict";
@@ -5412,11 +5475,10 @@ define("backburner/queue",
       }
     };
 
-
     __exports__.Queue = Queue;
   });
 
-define("backburner/deferred_action_queues",
+define("backburner/deferred_action_queues", 
   ["backburner/queue","exports"],
   function(__dependency1__, __exports__) {
     "use strict";
@@ -5515,11 +5577,10 @@ define("backburner/deferred_action_queues",
       return -1;
     }
 
-
     __exports__.DeferredActionQueues = DeferredActionQueues;
   });
 
-define("backburner",
+define("backburner", 
   ["backburner/deferred_action_queues","exports"],
   function(__dependency1__, __exports__) {
     "use strict";
@@ -5715,18 +5776,7 @@ define("backburner",
 
         timers.splice(i, 0, executeAt, fn);
 
-        if (laterTimer && laterTimerExpiresAt < executeAt) { return fn; }
-
-        if (laterTimer) {
-          clearTimeout(laterTimer);
-          laterTimer = null;
-        }
-        laterTimer = global.setTimeout(function() {
-          executeTimers(self);
-          laterTimer = null;
-          laterTimerExpiresAt = null;
-        }, wait);
-        laterTimerExpiresAt = executeAt;
+        updateLaterTimer(self, executeAt, wait);
 
         return fn;
       },
@@ -5735,30 +5785,25 @@ define("backburner",
         var self = this,
             args = arguments,
             wait = parseInt(pop.call(args), 10),
-            throttler;
+            throttler,
+            index,
+            timer;
 
-        for (var i = 0, l = throttlers.length; i < l; i++) {
-          throttler = throttlers[i];
-          if (throttler[0] === target && throttler[1] === method) { return; } // do nothing
-        }
+        index = findThrottler(target, method);
+        if (index > -1) { return throttlers[index]; } // throttled
 
-        var timer = global.setTimeout(function() {
+        timer = global.setTimeout(function() {
           self.run.apply(self, args);
 
-          // remove throttler
-          var index = -1;
-          for (var i = 0, l = throttlers.length; i < l; i++) {
-            throttler = throttlers[i];
-            if (throttler[0] === target && throttler[1] === method) {
-              index = i;
-              break;
-            }
-          }
-
+          var index = findThrottler(target, method);
           if (index > -1) { throttlers.splice(index, 1); }
         }, wait);
 
-        throttlers.push([target, method, timer]);
+        throttler = [target, method, timer];
+
+        throttlers.push(throttler);
+
+        return throttler;
       },
 
       debounce: function(target, method /* , args, wait, [immediate] */) {
@@ -5767,7 +5812,8 @@ define("backburner",
             immediate = pop.call(args),
             wait,
             index,
-            debouncee;
+            debouncee,
+            timer;
 
         if (typeof immediate === "number" || typeof immediate === "string") {
           wait = immediate;
@@ -5780,18 +5826,18 @@ define("backburner",
         // Remove debouncee
         index = findDebouncee(target, method);
 
-        if (index !== -1) {
+        if (index > -1) {
           debouncee = debouncees[index];
           debouncees.splice(index, 1);
           clearTimeout(debouncee[2]);
         }
 
-        var timer = global.setTimeout(function() {
+        timer = global.setTimeout(function() {
           if (!immediate) {
             self.run.apply(self, args);
           }
-          index = findDebouncee(target, method);
-          if (index) {
+          var index = findDebouncee(target, method);
+          if (index > -1) {
             debouncees.splice(index, 1);
           }
         }, wait);
@@ -5800,7 +5846,11 @@ define("backburner",
           self.run.apply(self, args);
         }
 
-        debouncees.push([target, method, timer]);
+        debouncee = [target, method, timer];
+
+        debouncees.push(debouncee);
+
+        return debouncee;
       },
 
       cancelTimers: function() {
@@ -5833,19 +5883,47 @@ define("backburner",
       },
 
       cancel: function(timer) {
-        if (timer && typeof timer === 'object' && timer.queue && timer.method) { // we're cancelling a deferOnce
+        var timerType = typeof timer;
+
+        if (timer && timerType === 'object' && timer.queue && timer.method) { // we're cancelling a deferOnce
           return timer.queue.cancel(timer);
-        } else if (typeof timer === 'function') { // we're cancelling a setTimeout
+        } else if (timerType === 'function') { // we're cancelling a setTimeout
           for (var i = 0, l = timers.length; i < l; i += 2) {
             if (timers[i + 1] === timer) {
               timers.splice(i, 2); // remove the two elements
               return true;
             }
           }
+        } else if (window.toString.call(timer) === "[object Array]"){ // we're cancelling a throttle or debounce
+          return this._cancelItem(findThrottler, throttlers, timer) || 
+                   this._cancelItem(findDebouncee, debouncees, timer);
         } else {
           return; // timer was null or not a timer
         }
+      },
+
+      _cancelItem: function(findMethod, array, timer){
+        var item,
+            index;
+
+        if (timer.length < 3) { return false; }
+
+        index = findMethod(timer[0], timer[1]);
+
+        if(index > -1) {
+
+          item = array[index];
+
+          if(item[2] === timer[2]){
+            array.splice(index, 1);
+            clearTimeout(timer[2]);
+            return true;
+          }
+        }
+
+        return false;
       }
+
     };
 
     Backburner.prototype.schedule = Backburner.prototype.defer;
@@ -5858,6 +5936,20 @@ define("backburner",
         autorun = null;
         backburner.end();
       });
+    }
+
+    function updateLaterTimer(self, executeAt, wait) {
+      if (!laterTimer || executeAt < laterTimerExpiresAt) {
+        if (laterTimer) {
+          clearTimeout(laterTimer);
+        }
+        laterTimer = global.setTimeout(function() {
+          laterTimer = null;
+          laterTimerExpiresAt = null;
+          executeTimers(self);
+        }, wait);
+        laterTimerExpiresAt = executeAt;
+      }
     }
 
     function executeTimers(self) {
@@ -5879,12 +5971,7 @@ define("backburner",
       });
 
       if (timers.length) {
-        laterTimer = global.setTimeout(function() {
-          executeTimers(self);
-          laterTimer = null;
-          laterTimerExpiresAt = null;
-        }, timers[0] - now);
-        laterTimerExpiresAt = timers[0];
+        updateLaterTimer(self, timers[0], timers[0] - now);
       }
     }
 
@@ -5903,9 +5990,24 @@ define("backburner",
       return index;
     }
 
+    function findThrottler(target, method) {
+      var throttler,
+          index = -1;
+
+      for (var i = 0, l = throttlers.length; i < l; i++) {
+        throttler = throttlers[i];
+        if (throttler[0] === target && throttler[1] === method) {
+          index = i;
+          break;
+        }
+      }
+
+      return index;
+    }
 
     __exports__.Backburner = Backburner;
   });
+
 })();
 
 
@@ -6193,7 +6295,7 @@ Ember.run.later = function(target, method) {
     If you pass a string it will be resolved on the
     target at the time the method is invoked.
   @param {Object} [args*] Optional arguments to pass to the timeout.
-  @return {Object} timer
+  @return {Object} Timer information for use in cancelling, see `Ember.run.cancel`.
 */
 Ember.run.once = function(target, method) {
   checkAutoRun();
@@ -6244,7 +6346,7 @@ Ember.run.once = function(target, method) {
     If you pass a string it will be resolved on the
     target at the time the method is invoked.
   @param {Object} [args*] Optional arguments to pass to the timeout.
-  @return {Object} timer
+  @return {Object} Timer information for use in cancelling, see `Ember.run.cancel`.
 */
 Ember.run.scheduleOnce = function(queue, target, method) {
   checkAutoRun();
@@ -6306,7 +6408,7 @@ Ember.run.scheduleOnce = function(queue, target, method) {
     If you pass a string it will be resolved on the
     target at the time the method is invoked.
   @param {Object} [args*] Optional arguments to pass to the timeout.
-  @return {Object} timer
+  @return {Object} Timer information for use in cancelling, see `Ember.run.cancel`.
 */
 Ember.run.next = function() {
   var args = slice.call(arguments);
@@ -6316,7 +6418,8 @@ Ember.run.next = function() {
 
 /**
   Cancels a scheduled item. Must be a value returned by `Ember.run.later()`,
-  `Ember.run.once()`, or `Ember.run.next()`.
+  `Ember.run.once()`, `Ember.run.next()`, `Ember.run.debounce()`, or 
+  `Ember.run.throttle()`.
 
   ```javascript
   var runNext = Ember.run.next(myContext, function() {
@@ -6333,11 +6436,29 @@ Ember.run.next = function() {
     // will not be executed
   });
   Ember.run.cancel(runOnce);
+
+  var throttle = Ember.run.throttle(myContext, function() {
+    // will not be executed
+  }, 1);
+  Ember.run.cancel(throttle);
+
+  var debounce = Ember.run.debounce(myContext, function() {
+    // will not be executed
+  }, 1);
+  Ember.run.cancel(debounce);
+
+  var debounceImmediate = Ember.run.debounce(myContext, function() {
+    // will be executed since we passed in true (immediate)
+  }, 100, true);
+  // the 100ms delay until this method can be called again will be cancelled
+  Ember.run.cancel(debounceImmediate);
+  ```
+  ```
   ```
 
   @method cancel
   @param {Object} timer Timer object to cancel
-  @return {void}
+  @return {Boolean} true if cancelled or false/undefined if it wasn't found
 */
 Ember.run.cancel = function(timer) {
   return backburner.cancel(timer);
@@ -6369,6 +6490,34 @@ Ember.run.cancel = function(timer) {
     // console logs 'debounce ran.' one time.
   ```
 
+  Immediate allows you to run the function immediately, but debounce
+  other calls for this function until the wait time has elapsed. If
+  `debounce` is called again before the specified time has elapsed,
+  the timer is reset and the entire period msut pass again before
+  the method can be called again.
+
+  ```javascript
+    var myFunc = function() { console.log(this.name + ' ran.'); };
+    var myContext = {name: 'debounce'};
+
+    Ember.run.debounce(myContext, myFunc, 150, true);
+
+    // console logs 'debounce ran.' one time immediately.
+    // 100ms passes
+
+    Ember.run.debounce(myContext, myFunc, 150, true);
+
+    // 150ms passes and nothing else is logged to the console and 
+    // the debouncee is no longer being watched
+
+    Ember.run.debounce(myContext, myFunc, 150, true);
+
+    // console logs 'debounce ran.' one time immediately.
+    // 150ms passes and nothing else is logged tot he console and
+    // the debouncee is no longer being watched
+
+  ```
+
   @method debounce
   @param {Object} [target] target of method to invoke
   @param {Function|String} method The method to invoke.
@@ -6377,7 +6526,7 @@ Ember.run.cancel = function(timer) {
   @param {Object} [args*] Optional arguments to pass to the timeout.
   @param {Number} wait Number of milliseconds to wait.
   @param {Boolean} immediate Trigger the function on the leading instead of the trailing edge of the wait interval.
-  @return {void}
+  @return {Array} Timer information for use in cancelling, see `Ember.run.cancel`.
 */
 Ember.run.debounce = function() {
   return backburner.debounce.apply(backburner, arguments);
@@ -6414,7 +6563,7 @@ Ember.run.debounce = function() {
     then it will be looked up on the passed target.
   @param {Object} [args*] Optional arguments to pass to the timeout.
   @param {Number} spacing Number of milliseconds to space out requests.
-  @return {void}
+  @return {Array} Timer information for use in cancelling, see `Ember.run.cancel`.
 */
 Ember.run.throttle = function() {
   return backburner.throttle.apply(backburner, arguments);
@@ -6923,6 +7072,10 @@ var Mixin, REQUIRED, Alias,
     o_create = Ember.create,
     defineProperty = Ember.defineProperty,
     guidFor = Ember.guidFor;
+
+if (Ember.FEATURES.isEnabled('propertyBraceExpansion')) {
+  var expandProperties = Ember.expandProperties;
+}
 
 function mixinsMeta(obj) {
   var m = Ember.meta(obj, true), ret = m.mixins;
@@ -7497,35 +7650,6 @@ Alias = function(methodName) {
 Alias.prototype = new Ember.Descriptor();
 
 /**
-  Makes a property or method available via an additional name.
-
-  ```javascript
-  App.PaintSample = Ember.Object.extend({
-    color: 'red',
-    colour: Ember.alias('color'),
-    name: function() {
-      return "Zed";
-    },
-    moniker: Ember.alias("name")
-  });
-
-  var paintSample = App.PaintSample.create()
-  paintSample.get('colour');  // 'red'
-  paintSample.moniker();      // 'Zed'
-  ```
-
-  @method alias
-  @for Ember
-  @param {String} methodName name of the method or property to alias
-  @return {Ember.Descriptor}
-  @deprecated Use `Ember.aliasMethod` or `Ember.computed.alias` instead
-*/
-Ember.alias = function(methodName) {
-
-  return new Alias(methodName);
-};
-
-/**
   Makes a method available via an additional name.
 
   ```javascript
@@ -7577,13 +7701,33 @@ Ember.aliasMethod = function(methodName) {
 */
 Ember.observer = function() {
   var func  = a_slice.call(arguments, -1)[0];
-  var paths = a_slice.call(arguments, 0, -1);
+  var paths;
 
-  if (typeof func !== "function") {
-    // revert to old, soft-deprecated argument ordering
+  if (Ember.FEATURES.isEnabled('propertyBraceExpansion')) {
+    var addWatchedProperty = function (path) { paths.push(path); };
+    var _paths = a_slice.call(arguments, 0, -1);
 
-    func  = arguments[0];
-    paths = a_slice.call(arguments, 1);
+    if (typeof func !== "function") {
+      // revert to old, soft-deprecated argument ordering
+
+      func  = arguments[0];
+      _paths = a_slice.call(arguments, 1);
+    }
+
+    paths = [];
+
+    for (var i=0; i<_paths.length; ++i) {
+      expandProperties(_paths[i], addWatchedProperty);
+    }
+  } else {
+    paths = a_slice.call(arguments, 0, -1);
+
+    if (typeof func !== "function") {
+      // revert to old, soft-deprecated argument ordering
+
+      func  = arguments[0];
+      paths = a_slice.call(arguments, 1);
+    }
   }
 
   if (typeof func !== "function") {
@@ -7671,13 +7815,34 @@ Ember.immediateObserver = function() {
 */
 Ember.beforeObserver = function() {
   var func  = a_slice.call(arguments, -1)[0];
-  var paths = a_slice.call(arguments, 0, -1);
+  var paths;
 
-  if (typeof func !== "function") {
-    // revert to old, soft-deprecated argument ordering
+  if (Ember.FEATURES.isEnabled('propertyBraceExpansion')) {
+    var addWatchedProperty = function(path) { paths.push(path); };
 
-    func  = arguments[0];
-    paths = a_slice.call(arguments, 1);
+    var _paths = a_slice.call(arguments, 0, -1);
+
+    if (typeof func !== "function") {
+      // revert to old, soft-deprecated argument ordering
+
+      func  = arguments[0];
+      _paths = a_slice.call(arguments, 1);
+    }
+
+    paths = [];
+
+    for (var i=0; i<_paths.length; ++i) {
+      expandProperties(_paths[i], addWatchedProperty);
+    }
+  } else {
+    paths = a_slice.call(arguments, 0, -1);
+
+    if (typeof func !== "function") {
+      // revert to old, soft-deprecated argument ordering
+
+      func  = arguments[0];
+      paths = a_slice.call(arguments, 1);
+    }
   }
 
   if (typeof func !== "function") {
@@ -7752,16 +7917,67 @@ Ember Metal
 })();
 
 (function() {
-define("rsvp/all",
-  ["rsvp/promise","exports"],
-  function(__dependency1__, __exports__) {
+/**
+  @class RSVP
+  @module RSVP
+  */
+define("rsvp/all", 
+  ["./promise","./utils","exports"],
+  function(__dependency1__, __dependency2__, __exports__) {
     "use strict";
-    var Promise = __dependency1__.Promise;
     /* global toString */
 
+    var Promise = __dependency1__.Promise;
+    var isArray = __dependency2__.isArray;
+    var isFunction = __dependency2__.isFunction;
 
-    function all(promises) {
-      if (Object.prototype.toString.call(promises) !== "[object Array]") {
+    /**
+      Returns a promise that is fulfilled when all the given promises have been
+      fulfilled, or rejected if any of them become rejected. The return promise
+      is fulfilled with an array that gives all the values in the order they were
+      passed in the `promises` array argument.
+
+      Example:
+
+      ```javascript
+      var promise1 = RSVP.resolve(1);
+      var promise2 = RSVP.resolve(2);
+      var promise3 = RSVP.resolve(3);
+      var promises = [ promise1, promise2, promise3 ];
+
+      RSVP.all(promises).then(function(array){
+        // The array here would be [ 1, 2, 3 ];
+      });
+      ```
+
+      If any of the `promises` given to `RSVP.all` are rejected, the first promise
+      that is rejected will be given as an argument to the returned promises's
+      rejection handler. For example:
+
+      Example:
+
+      ```javascript
+      var promise1 = RSVP.resolve(1);
+      var promise2 = RSVP.reject(new Error("2"));
+      var promise3 = RSVP.reject(new Error("3"));
+      var promises = [ promise1, promise2, promise3 ];
+
+      RSVP.all(promises).then(function(array){
+        // Code here never runs because there are rejected promises!
+      }, function(error) {
+        // error.message === "2"
+      });
+      ```
+
+      @method all
+      @for RSVP
+      @param {Array} promises
+      @param {String} label
+      @return {Promise} promise that is fulfilled when all `promises` have been
+      fulfilled, or rejected if any of them become rejected.
+    */
+    function all(promises, label) {
+      if (!isArray(promises)) {
         throw new TypeError('You must pass an array to all.');
       }
 
@@ -7789,114 +8005,158 @@ define("rsvp/all",
         for (var i = 0; i < promises.length; i++) {
           promise = promises[i];
 
-          if (promise && typeof promise.then === 'function') {
-            promise.then(resolver(i), reject);
+          if (promise && isFunction(promise.then)) {
+            promise.then(resolver(i), reject, "RSVP: RSVP#all");
           } else {
             resolveAll(i, promise);
           }
         }
-      });
+      }, label);
     }
-
 
     __exports__.all = all;
   });
-define("rsvp/async",
+
+define("rsvp/cast", 
   ["exports"],
   function(__exports__) {
     "use strict";
-    var browserGlobal = (typeof window !== 'undefined') ? window : {};
-    var BrowserMutationObserver = browserGlobal.MutationObserver || browserGlobal.WebKitMutationObserver;
-    var async;
-    var local = (typeof global !== 'undefined') ? global : this;
+    /**
+      `RSVP.Promise.cast` returns the same promise if that promise shares a constructor
+      with the promise being casted.
 
-    // old node
-    function useNextTick() {
-      return function(callback, arg) {
-        process.nextTick(function() {
-          callback(arg);
-        });
-      };
-    }
+      Example:
 
-    // node >= 0.10.x
-    function useSetImmediate() {
-      return function(callback, arg) {
-        /* global  setImmediate */
-        setImmediate(function(){
-          callback(arg);
-        });
-      };
-    }
+      ```javascript
+      var promise = RSVP.resolve(1);
+      var casted = RSVP.Promise.cast(promise);
 
-    function useMutationObserver() {
-      var queue = [];
+      console.log(promise === casted); // true
+      ```
 
-      var observer = new BrowserMutationObserver(function() {
-        var toProcess = queue.slice();
-        queue = [];
+      In the case of a promise whose constructor does not match, it is assimilated.
+      The resulting promise will fulfill or reject based on the outcome of the
+      promise being casted.
 
-        toProcess.forEach(function(tuple) {
-          var callback = tuple[0], arg= tuple[1];
-          callback(arg);
-        });
+      In the case of a non-promise, a promise which will fulfill with that value is
+      returned.
+
+      Example:
+
+      ```javascript
+      var value = 1; // could be a number, boolean, string, undefined...
+      var casted = RSVP.Promise.cast(value);
+
+      console.log(value === casted); // false
+      console.log(casted instanceof RSVP.Promise) // true
+
+      casted.then(function(val) {
+        val === value // => true
       });
+      ```
 
-      var element = document.createElement('div');
-      observer.observe(element, { attributes: true });
+      `RSVP.Promise.cast` is similar to `RSVP.resolve`, but `RSVP.Promise.cast` differs in the
+      following ways:
+      * `RSVP.Promise.cast` serves as a memory-efficient way of getting a promise, when you
+      have something that could either be a promise or a value. RSVP.resolve
+      will have the same effect but will create a new promise wrapper if the
+      argument is a promise.
+      * `RSVP.Promise.cast` is a way of casting incoming thenables or promise subclasses to
+      promises of the exact class specified, so that the resulting object's `then` is
+      ensured to have the behavior of the constructor you are calling cast on (i.e., RSVP.Promise).
 
-      // Chrome Memory Leak: https://bugs.webkit.org/show_bug.cgi?id=93661
-      window.addEventListener('unload', function(){
-        observer.disconnect();
-        observer = null;
-      }, false);
+      @method cast
+      @for RSVP
+      @param {Object} object to be casted
+      @return {Promise} promise that is fulfilled when all properties of `promises`
+      have been fulfilled, or rejected if any of them become rejected.
+    */
 
-      return function(callback, arg) {
-        queue.push([callback, arg]);
-        element.setAttribute('drainQueue', 'drainQueue');
-      };
+
+    function cast(object) {
+      /*jshint validthis:true */
+      if (object && typeof object === 'object' && object.constructor === this) {
+        return object;
+      }
+
+      var Promise = this;
+
+      return new Promise(function(resolve) {
+        resolve(object);
+      });
     }
 
-    function useSetTimeout() {
-      return function(callback, arg) {
-        local.setTimeout(function() {
-          callback(arg);
-        }, 1);
-      };
-    }
-
-    if (typeof setImmediate === 'function') {
-      async = useSetImmediate();
-    } else if (typeof process !== 'undefined' && {}.toString.call(process) === '[object process]') {
-      async = useNextTick();
-    } else if (BrowserMutationObserver) {
-      async = useMutationObserver();
-    } else {
-      async = useSetTimeout();
-    }
-
-
-    __exports__.async = async;
+    __exports__.cast = cast;
   });
-define("rsvp/config",
-  ["rsvp/async","exports"],
+define("rsvp/config", 
+  ["./events","exports"],
   function(__dependency1__, __exports__) {
     "use strict";
-    var async = __dependency1__.async;
+    var EventTarget = __dependency1__.EventTarget;
 
-    var config = {};
-    config.async = async;
+    var config = {
+      instrument: false
+    };
 
+    EventTarget.mixin(config);
+
+    function configure(name, value) {
+      if (name === 'onerror') {
+        // handle for legacy users that expect the actual
+        // error to be passed to their function added via
+        // `RSVP.configure('onerror', someFunctionHere);`
+        config.on('error', value);
+        return;
+      }
+
+      if (arguments.length === 2) {
+        config[name] = value;
+      } else {
+        return config[name];
+      }
+    }
 
     __exports__.config = config;
+    __exports__.configure = configure;
   });
-define("rsvp/defer",
-  ["rsvp/promise","exports"],
+define("rsvp/defer", 
+  ["./promise","exports"],
   function(__dependency1__, __exports__) {
     "use strict";
     var Promise = __dependency1__.Promise;
 
-    function defer() {
+    /**
+      `RSVP.defer` returns an object similar to jQuery's `$.Deferred` objects.
+      `RSVP.defer` should be used when porting over code reliant on `$.Deferred`'s
+      interface. New code should use the `RSVP.Promise` constructor instead.
+
+      The object returned from `RSVP.defer` is a plain object with three properties:
+
+      * promise - an `RSVP.Promise`.
+      * reject - a function that causes the `promise` property on this object to
+        become rejected
+      * resolve - a function that causes the `promise` property on this object to
+        become fulfilled.
+
+      Example:
+
+       ```javascript
+       var deferred = RSVP.defer();
+
+       deferred.resolve("Success!");
+
+       defered.promise.then(function(value){
+         // value here is "Success!"
+       });
+       ```
+
+      @method defer
+      @for RSVP
+      @param {String} -
+      @return {Object}
+     */
+
+    function defer(label) {
       var deferred = {
         // pre-allocate shape
         resolve: undefined,
@@ -7907,31 +8167,20 @@ define("rsvp/defer",
       deferred.promise = new Promise(function(resolve, reject) {
         deferred.resolve = resolve;
         deferred.reject = reject;
-      });
+      }, label);
 
       return deferred;
     }
 
-
     __exports__.defer = defer;
   });
-define("rsvp/events",
+define("rsvp/events", 
   ["exports"],
   function(__exports__) {
     "use strict";
-    var Event = function(type, options) {
-      this.type = type;
-
-      for (var option in options) {
-        if (!options.hasOwnProperty(option)) { continue; }
-
-        this[option] = options[option];
-      }
-    };
-
     var indexOf = function(callbacks, callback) {
       for (var i=0, l=callbacks.length; i<l; i++) {
-        if (callbacks[i][0] === callback) { return i; }
+        if (callbacks[i] === callback) { return i; }
       }
 
       return -1;
@@ -7947,251 +8196,545 @@ define("rsvp/events",
       return callbacks;
     };
 
+    /**
+      //@module RSVP
+      //@class EventTarget
+    */
     var EventTarget = {
+
+      /**
+        @private
+        `RSVP.EventTarget.mixin` extends an object with EventTarget methods. For
+        Example:
+
+        ```javascript
+        var object = {};
+
+        RSVP.EventTarget.mixin(object);
+
+        object.on("finished", function(event) {
+          // handle event
+        });
+
+        object.trigger("finished", { detail: value });
+        ```
+
+        `EventTarget.mixin` also works with prototypes:
+
+        ```javascript
+        var Person = function() {};
+        RSVP.EventTarget.mixin(Person.prototype);
+
+        var yehuda = new Person();
+        var tom = new Person();
+
+        yehuda.on("poke", function(event) {
+          console.log("Yehuda says OW");
+        });
+
+        tom.on("poke", function(event) {
+          console.log("Tom says OW");
+        });
+
+        yehuda.trigger("poke");
+        tom.trigger("poke");
+        ```
+
+        @method mixin
+        @param {Object} object object to extend with EventTarget methods
+      */
       mixin: function(object) {
         object.on = this.on;
         object.off = this.off;
         object.trigger = this.trigger;
+        object._promiseCallbacks = undefined;
         return object;
       },
 
-      on: function(eventNames, callback, binding) {
-        var allCallbacks = callbacksFor(this), callbacks, eventName;
-        eventNames = eventNames.split(/\s+/);
-        binding = binding || this;
+      /**
+        @private
 
-        while (eventName = eventNames.shift()) {
-          callbacks = allCallbacks[eventName];
+        Registers a callback to be executed when `eventName` is triggered
 
-          if (!callbacks) {
-            callbacks = allCallbacks[eventName] = [];
-          }
+        ```javascript
+        object.on('event', function(eventInfo){
+          // handle the event
+        });
 
-          if (indexOf(callbacks, callback) === -1) {
-            callbacks.push([callback, binding]);
-          }
+        object.trigger('event');
+        ```
+
+        @method on
+        @param {String} eventName name of the event to listen for
+        @param {Function} callback function to be called when the event is triggered.
+      */
+      on: function(eventName, callback) {
+        var allCallbacks = callbacksFor(this), callbacks;
+
+        callbacks = allCallbacks[eventName];
+
+        if (!callbacks) {
+          callbacks = allCallbacks[eventName] = [];
+        }
+
+        if (indexOf(callbacks, callback) === -1) {
+          callbacks.push(callback);
         }
       },
 
-      off: function(eventNames, callback) {
-        var allCallbacks = callbacksFor(this), callbacks, eventName, index;
-        eventNames = eventNames.split(/\s+/);
+      /**
+        @private
 
-        while (eventName = eventNames.shift()) {
-          if (!callback) {
-            allCallbacks[eventName] = [];
-            continue;
-          }
+        You can use `off` to stop firing a particular callback for an event:
 
-          callbacks = allCallbacks[eventName];
+        ```javascript
+        function doStuff() { // do stuff! }
+        object.on('stuff', doStuff);
 
-          index = indexOf(callbacks, callback);
+        object.trigger('stuff'); // doStuff will be called
 
-          if (index !== -1) { callbacks.splice(index, 1); }
+        // Unregister ONLY the doStuff callback
+        object.off('stuff', doStuff);
+        object.trigger('stuff'); // doStuff will NOT be called
+        ```
+
+        If you don't pass a `callback` argument to `off`, ALL callbacks for the
+        event will not be executed when the event fires. For example:
+
+        ```javascript
+        var callback1 = function(){};
+        var callback2 = function(){};
+
+        object.on('stuff', callback1);
+        object.on('stuff', callback2);
+
+        object.trigger('stuff'); // callback1 and callback2 will be executed.
+
+        object.off('stuff');
+        object.trigger('stuff'); // callback1 and callback2 will not be executed!
+        ```
+
+        @method off
+        @param {String} eventName event to stop listening to
+        @param {Function} callback optional argument. If given, only the function
+        given will be removed from the event's callback queue. If no `callback`
+        argument is given, all callbacks will be removed from the event's callback
+        queue.
+      */
+      off: function(eventName, callback) {
+        var allCallbacks = callbacksFor(this), callbacks, index;
+
+        if (!callback) {
+          allCallbacks[eventName] = [];
+          return;
         }
+
+        callbacks = allCallbacks[eventName];
+
+        index = indexOf(callbacks, callback);
+
+        if (index !== -1) { callbacks.splice(index, 1); }
       },
 
+      /**
+        @private
+
+        Use `trigger` to fire custom events. For example:
+
+        ```javascript
+        object.on('foo', function(){
+          console.log('foo event happened!');
+        });
+        object.trigger('foo');
+        // 'foo event happened!' logged to the console
+        ```
+
+        You can also pass a value as a second argument to `trigger` that will be
+        passed as an argument to all event listeners for the event:
+
+        ```javascript
+        object.on('foo', function(value){
+          console.log(value.name);
+        });
+
+        object.trigger('foo', { name: 'bar' });
+        // 'bar' logged to the console
+        ```
+
+        @method trigger
+        @param {String} eventName name of the event to be triggered
+        @param {Any} options optional value to be passed to any event handlers for
+        the given `eventName`
+      */
       trigger: function(eventName, options) {
         var allCallbacks = callbacksFor(this),
-            callbacks, callbackTuple, callback, binding, event;
+            callbacks, callbackTuple, callback, binding;
 
         if (callbacks = allCallbacks[eventName]) {
           // Don't cache the callbacks.length since it may grow
           for (var i=0; i<callbacks.length; i++) {
-            callbackTuple = callbacks[i];
-            callback = callbackTuple[0];
-            binding = callbackTuple[1];
+            callback = callbacks[i];
 
-            if (typeof options !== 'object') {
-              options = { detail: options };
-            }
-
-            event = new Event(eventName, options);
-            callback.call(binding, event);
+            callback(options);
           }
         }
       }
     };
 
-
     __exports__.EventTarget = EventTarget;
   });
-define("rsvp/hash",
-  ["rsvp/defer","exports"],
-  function(__dependency1__, __exports__) {
+define("rsvp/hash", 
+  ["./promise","./utils","exports"],
+  function(__dependency1__, __dependency2__, __exports__) {
     "use strict";
-    var defer = __dependency1__.defer;
+    var Promise = __dependency1__.Promise;
+    var isFunction = __dependency2__.isFunction;
 
-    function size(object) {
-      var s = 0;
+    var keysOf = Object.keys || function(object) {
+      var result = [];
 
       for (var prop in object) {
-        s++;
+        result.push(prop);
       }
 
-      return s;
-    }
+      return result;
+    };
 
-    function hash(promises) {
-      var results = {}, deferred = defer(), remaining = size(promises);
+    /**
+      `RSVP.hash` is similar to `RSVP.all`, but takes an object instead of an array
+      for its `promises` argument.
 
-      if (remaining === 0) {
-        deferred.resolve({});
+      Returns a promise that is fulfilled when all the given promises have been
+      fulfilled, or rejected if any of them become rejected. The returned promise
+      is fulfilled with a hash that has the same key names as the `promises` object
+      argument. If any of the values in the object are not promises, they will
+      simply be copied over to the fulfilled object.
+
+      Example:
+
+      ```javascript
+      var promises = {
+        myPromise: RSVP.resolve(1),
+        yourPromise: RSVP.resolve(2),
+        theirPromise: RSVP.resolve(3),
+        notAPromise: 4
+      };
+
+      RSVP.hash(promises).then(function(hash){
+        // hash here is an object that looks like:
+        // {
+        //   myPromise: 1,
+        //   yourPromise: 2,
+        //   theirPromise: 3,
+        //   notAPromise: 4
+        // }
+      });
+      ````
+
+      If any of the `promises` given to `RSVP.hash` are rejected, the first promise
+      that is rejected will be given as as the first argument, or as the reason to
+      the rejection handler. For example:
+
+      ```javascript
+      var promises = {
+        myPromise: RSVP.resolve(1),
+        rejectedPromise: RSVP.reject(new Error("rejectedPromise")),
+        anotherRejectedPromise: RSVP.reject(new Error("anotherRejectedPromise")),
+      };
+
+      RSVP.hash(promises).then(function(hash){
+        // Code here never runs because there are rejected promises!
+      }, function(reason) {
+        // reason.message === "rejectedPromise"
+      });
+      ```
+
+      An important note: `RSVP.hash` is intended for plain JavaScript objects that
+      are just a set of keys and values. `RSVP.hash` will NOT preserve prototype
+      chains.
+
+      Example:
+
+      ```javascript
+      function MyConstructor(){
+        this.example = RSVP.resolve("Example");
       }
 
-      var resolver = function(prop) {
-        return function(value) {
-          resolveAll(prop, value);
+      MyConstructor.prototype = {
+        protoProperty: RSVP.resolve("Proto Property")
+      };
+
+      var myObject = new MyConstructor();
+
+      RSVP.hash(myObject).then(function(hash){
+        // protoProperty will not be present, instead you will just have an
+        // object that looks like:
+        // {
+        //   example: "Example"
+        // }
+        //
+        // hash.hasOwnProperty('protoProperty'); // false
+        // 'undefined' === typeof hash.protoProperty
+      });
+      ```
+
+      @method hash
+      @for RSVP
+      @param {Object} promises
+      @param {String} label - optional string that describes the promise.
+      Useful for tooling.
+      @return {Promise} promise that is fulfilled when all properties of `promises`
+      have been fulfilled, or rejected if any of them become rejected.
+    */
+    function hash(object, label) {
+      var results = {},
+          keys = keysOf(object),
+          remaining = keys.length;
+
+      return new Promise(function(resolve, reject){
+        var promise, prop;
+
+        if (remaining === 0) {
+          resolve({});
+          return;
+        }
+
+        var resolver = function(prop) {
+          return function(value) {
+            resolveAll(prop, value);
+          };
         };
-      };
 
-      var resolveAll = function(prop, value) {
-        results[prop] = value;
-        if (--remaining === 0) {
-          deferred.resolve(results);
+        var resolveAll = function(prop, value) {
+          results[prop] = value;
+          if (--remaining === 0) {
+            resolve(results);
+          }
+        };
+
+
+        for (var i = 0, l = keys.length; i < l; i ++) {
+          prop = keys[i];
+          promise = object[prop];
+
+          if (promise && isFunction(promise.then)) {
+            promise.then(resolver(prop), reject, "RSVP: RSVP#hash");
+          } else {
+            resolveAll(prop, promise);
+          }
         }
-      };
-
-      var rejectAll = function(error) {
-        deferred.reject(error);
-      };
-
-      for (var prop in promises) {
-        if (promises[prop] && typeof promises[prop].then === 'function') {
-          promises[prop].then(resolver(prop), rejectAll);
-        } else {
-          resolveAll(prop, promises[prop]);
-        }
-      }
-
-      return deferred.promise;
+      });
     }
-
 
     __exports__.hash = hash;
   });
-define("rsvp/node",
-  ["rsvp/promise","rsvp/all","exports"],
+define("rsvp/instrument", 
+  ["./config","./utils","exports"],
+  function(__dependency1__, __dependency2__, __exports__) {
+    "use strict";
+    var config = __dependency1__.config;
+    var now = __dependency2__.now;
+
+    function instrument(eventName, promise, child) {
+      // instrumentation should not disrupt normal usage.
+      try {
+        config.trigger(eventName, {
+          guid: promise._guidKey + promise._id,
+          eventName: eventName,
+          detail: promise._detail,
+          childGuid: child && promise._guidKey + child._id,
+          label: promise._label,
+          timeStamp: now()
+        });
+      } catch(error) {
+        setTimeout(function(){
+          throw error;
+        }, 0);
+      }
+    }
+
+    __exports__.instrument = instrument;
+  });
+define("rsvp/node", 
+  ["./promise","./all","exports"],
   function(__dependency1__, __dependency2__, __exports__) {
     "use strict";
     var Promise = __dependency1__.Promise;
     var all = __dependency2__.all;
+
+    var slice = Array.prototype.slice;
 
     function makeNodeCallbackFor(resolve, reject) {
       return function (error, value) {
         if (error) {
           reject(error);
         } else if (arguments.length > 2) {
-          resolve(Array.prototype.slice.call(arguments, 1));
+          resolve(slice.call(arguments, 1));
         } else {
           resolve(value);
         }
       };
     }
 
-    function denodeify(nodeFunc) {
+    /**
+      `RSVP.denodeify` takes a "node-style" function and returns a function that
+      will return an `RSVP.Promise`. You can use `denodeify` in Node.js or the
+      browser when you'd prefer to use promises over using callbacks. For example,
+      `denodeify` transforms the following:
+
+      ```javascript
+      var fs = require('fs');
+
+      fs.readFile('myfile.txt', function(err, data){
+        if (err) return handleError(err);
+        handleData(data);
+      });
+      ```
+
+      into:
+
+      ```javascript
+      var fs = require('fs');
+
+      var readFile = RSVP.denodeify(fs.readFile);
+
+      readFile('myfile.txt').then(handleData, handleError);
+      ```
+
+      Using `denodeify` makes it easier to compose asynchronous operations instead
+      of using callbacks. For example, instead of:
+
+      ```javascript
+      var fs = require('fs');
+      var log = require('some-async-logger');
+
+      fs.readFile('myfile.txt', function(err, data){
+        if (err) return handleError(err);
+        fs.writeFile('myfile2.txt', data, function(err){
+          if (err) throw err;
+          log('success', function(err) {
+            if (err) throw err;
+          });
+        });
+      });
+      ```
+
+      You can chain the operations together using `then` from the returned promise:
+
+      ```javascript
+      var fs = require('fs');
+      var denodeify = RSVP.denodeify;
+      var readFile = denodeify(fs.readFile);
+      var writeFile = denodeify(fs.writeFile);
+      var log = denodeify(require('some-async-logger'));
+
+      readFile('myfile.txt').then(function(data){
+        return writeFile('myfile2.txt', data);
+      }).then(function(){
+        return log('SUCCESS');
+      }).then(function(){
+        // success handler
+      }, function(reason){
+        // rejection handler
+      });
+      ```
+
+      @method denodeify
+      @for RSVP
+      @param {Function} nodeFunc a "node-style" function that takes a callback as
+      its last argument. The callback expects an error to be passed as its first
+      argument (if an error occurred, otherwise null), and the value from the
+      operation as its second argument ("function(err, value){ }").
+      @param {Any} binding optional argument for binding the "this" value when
+      calling the `nodeFunc` function.
+      @return {Function} a function that wraps `nodeFunc` to return an
+      `RSVP.Promise`
+    */
+    function denodeify(nodeFunc, binding) {
       return function()  {
-        var nodeArgs = Array.prototype.slice.call(arguments), resolve, reject;
-        var thisArg = this;
+        var nodeArgs = slice.call(arguments), resolve, reject;
+        var thisArg = this || binding;
 
-        var promise = new Promise(function(nodeResolve, nodeReject) {
-          resolve = nodeResolve;
-          reject = nodeReject;
+        return new Promise(function(resolve, reject) {
+          all(nodeArgs).then(function(nodeArgs) {
+            try {
+              nodeArgs.push(makeNodeCallbackFor(resolve, reject));
+              nodeFunc.apply(thisArg, nodeArgs);
+            } catch(e) {
+              reject(e);
+            }
+          });
         });
-
-        all(nodeArgs).then(function(nodeArgs) {
-          nodeArgs.push(makeNodeCallbackFor(resolve, reject));
-
-          try {
-            nodeFunc.apply(thisArg, nodeArgs);
-          } catch(e) {
-            reject(e);
-          }
-        });
-
-        return promise;
       };
     }
-
 
     __exports__.denodeify = denodeify;
   });
-define("rsvp/promise",
-  ["rsvp/config","rsvp/events","exports"],
-  function(__dependency1__, __dependency2__, __exports__) {
+define("rsvp/promise", 
+  ["./config","./events","./cast","./instrument","./utils","exports"],
+  function(__dependency1__, __dependency2__, __dependency3__, __dependency4__, __dependency5__, __exports__) {
     "use strict";
     var config = __dependency1__.config;
     var EventTarget = __dependency2__.EventTarget;
+    var cast = __dependency3__.cast;
+    var instrument = __dependency4__.instrument;
+    var objectOrFunction = __dependency5__.objectOrFunction;
+    var isFunction = __dependency5__.isFunction;
+    var now = __dependency5__.now;
 
-    function objectOrFunction(x) {
-      return isFunction(x) || (typeof x === "object" && x !== null);
-    }
+    var guidKey = 'rsvp_' + now() + '-';
+    var counter = 0;
 
-    function isFunction(x){
-      return typeof x === "function";
-    }
-
-    var Promise = function(resolver) {
-      var promise = this,
-      resolved = false;
-
-      if (typeof resolver !== 'function') {
-        throw new TypeError('You must pass a resolver function as the sole argument to the promise constructor');
+    function Promise(resolver, label) {
+      if (!isFunction(resolver)) {
+        throw new TypeError('You must pass a resolver function as the first argument to the promise constructor');
       }
 
-      if (!(promise instanceof Promise)) {
-        return new Promise(resolver);
+      if (!(this instanceof Promise)) {
+        throw new TypeError("Failed to construct 'Promise': Please use the 'new' operator, this object constructor cannot be called as a function.");
       }
 
-      var resolvePromise = function(value) {
-        if (resolved) { return; }
-        resolved = true;
+      this._id = counter++;
+      this._label = label;
+      this._subscribers = [];
+
+      if (config.instrument) {
+        instrument('created', this);
+      }
+
+      invokeResolver(resolver, this);
+    }
+
+    function invokeResolver(resolver, promise) {
+      function resolvePromise(value) {
         resolve(promise, value);
-      };
+      }
 
-      var rejectPromise = function(value) {
-        if (resolved) { return; }
-        resolved = true;
-        reject(promise, value);
-      };
-
-      this.on('promise:resolved', function(event) {
-        this.trigger('success', { detail: event.detail });
-      }, this);
-
-      this.on('promise:failed', function(event) {
-        this.trigger('error', { detail: event.detail });
-      }, this);
-
-      this.on('error', onerror);
+      function rejectPromise(reason) {
+        reject(promise, reason);
+      }
 
       try {
         resolver(resolvePromise, rejectPromise);
       } catch(e) {
         rejectPromise(e);
       }
-    };
-
-    function onerror(event) {
-      if (config.onerror) {
-        config.onerror(event.detail);
-      }
     }
 
-    var invokeCallback = function(type, promise, callback, event) {
+    function invokeCallback(settled, promise, callback, detail) {
       var hasCallback = isFunction(callback),
           value, error, succeeded, failed;
 
       if (hasCallback) {
         try {
-          value = callback(event.detail);
+          value = callback(detail);
           succeeded = true;
         } catch(e) {
           failed = true;
           error = e;
         }
       } else {
-        value = event.detail;
+        value = detail;
         succeeded = true;
       }
 
@@ -8201,63 +8744,101 @@ define("rsvp/promise",
         resolve(promise, value);
       } else if (failed) {
         reject(promise, error);
-      } else if (type === 'resolve') {
+      } else if (settled === FULFILLED) {
         resolve(promise, value);
-      } else if (type === 'reject') {
+      } else if (settled === REJECTED) {
         reject(promise, value);
       }
-    };
+    }
+
+    var PENDING   = void 0;
+    var SEALED    = 0;
+    var FULFILLED = 1;
+    var REJECTED  = 2;
+
+    function subscribe(parent, child, onFulfillment, onRejection) {
+      var subscribers = parent._subscribers;
+      var length = subscribers.length;
+
+      subscribers[length] = child;
+      subscribers[length + FULFILLED] = onFulfillment;
+      subscribers[length + REJECTED]  = onRejection;
+    }
+
+    function publish(promise, settled) {
+      var child, callback, subscribers = promise._subscribers, detail = promise._detail;
+
+      if (config.instrument) {
+        instrument(settled === FULFILLED ? 'fulfilled' : 'rejected', promise);
+      }
+
+      for (var i = 0; i < subscribers.length; i += 3) {
+        child = subscribers[i];
+        callback = subscribers[i + settled];
+
+        invokeCallback(settled, child, callback, detail);
+      }
+
+      promise._subscribers = null;
+    }
 
     Promise.prototype = {
       constructor: Promise,
 
-      isRejected: undefined,
-      isFulfilled: undefined,
-      rejectedReason: undefined,
-      fulfillmentValue: undefined,
+      _id: undefined,
+      _guidKey: guidKey,
+      _label: undefined,
 
-      then: function(done, fail) {
-        this.off('error', onerror);
+      _state: undefined,
+      _detail: undefined,
+      _subscribers: undefined,
 
-        var thenPromise = new this.constructor(function() {});
+      _onerror: function (reason) {
+        config.trigger('error', reason);
+      },
 
-        if (this.isFulfilled) {
-          config.async(function(promise) {
-            invokeCallback('resolve', thenPromise, done, { detail: promise.fulfillmentValue });
-          }, this);
+      then: function(onFulfillment, onRejection, label) {
+        var promise = this;
+        this._onerror = null;
+
+        var thenPromise = new this.constructor(function() {}, label);
+
+        if (this._state) {
+          var callbacks = arguments;
+          config.async(function invokePromiseCallback() {
+            invokeCallback(promise._state, thenPromise, callbacks[promise._state - 1], promise._detail);
+          });
+        } else {
+          subscribe(this, thenPromise, onFulfillment, onRejection);
         }
 
-        if (this.isRejected) {
-          config.async(function(promise) {
-            invokeCallback('reject', thenPromise, fail, { detail: promise.rejectedReason });
-          }, this);
+        if (config.instrument) {
+          instrument('chained', promise, thenPromise);
         }
-
-        this.on('promise:resolved', function(event) {
-          invokeCallback('resolve', thenPromise, done, event);
-        });
-
-        this.on('promise:failed', function(event) {
-          invokeCallback('reject', thenPromise, fail, event);
-        });
 
         return thenPromise;
       },
 
-      fail: function(fail) {
-        return this.then(null, fail);
+      'catch': function(onRejection, label) {
+        return this.then(null, onRejection, label);
+      },
+
+      'finally': function(callback, label) {
+        var constructor = this.constructor;
+
+        return this.then(function(value) {
+          return constructor.cast(callback()).then(function(){
+            return value;
+          });
+        }, function(reason) {
+          return constructor.cast(callback()).then(function(){
+            throw reason;
+          });
+        }, label);
       }
     };
 
-    EventTarget.mixin(Promise.prototype);
-
-    function resolve(promise, value) {
-      if (promise === value) {
-        fulfill(promise, value);
-      } else if (!handleThenable(promise, value)) {
-        fulfill(promise, value);
-      }
-    }
+    Promise.cast = cast;
 
     function handleThenable(promise, value) {
       var then = null,
@@ -8286,12 +8867,13 @@ define("rsvp/promise",
               resolved = true;
 
               reject(promise, val);
-            });
+            }, 'Locked onto ' + (promise._label || ' unknown promise'));
 
             return true;
           }
         }
       } catch (error) {
+        if (resolved) { return true; }
         reject(promise, error);
         return true;
       }
@@ -8299,61 +8881,276 @@ define("rsvp/promise",
       return false;
     }
 
+    function resolve(promise, value) {
+      if (promise === value) {
+        fulfill(promise, value);
+      } else if (!handleThenable(promise, value)) {
+        fulfill(promise, value);
+      }
+    }
+
     function fulfill(promise, value) {
-      config.async(function() {
-        promise.trigger('promise:resolved', { detail: value });
-        promise.isFulfilled = true;
-        promise.fulfillmentValue = value;
-      });
+      if (promise._state !== PENDING) { return; }
+      promise._state = SEALED;
+      promise._detail = value;
+
+      config.async(publishFulfillment, promise);
     }
 
-    function reject(promise, value) {
-      config.async(function() {
-        promise.trigger('promise:failed', { detail: value });
-        promise.isRejected = true;
-        promise.rejectedReason = value;
-      });
+    function reject(promise, reason) {
+      if (promise._state !== PENDING) { return; }
+      promise._state = SEALED;
+      promise._detail = reason;
+
+      config.async(publishRejection, promise);
     }
 
+    function publishFulfillment(promise) {
+      publish(promise, promise._state = FULFILLED);
+    }
+
+    function publishRejection(promise) {
+      if (promise._onerror) {
+        promise._onerror(promise._detail);
+      }
+
+      publish(promise, promise._state = REJECTED);
+    }
 
     __exports__.Promise = Promise;
   });
-define("rsvp/reject",
-  ["rsvp/promise","exports"],
+define("rsvp/race", 
+  ["./promise","./utils","exports"],
+  function(__dependency1__, __dependency2__, __exports__) {
+    "use strict";
+    /* global toString */
+
+    var Promise = __dependency1__.Promise;
+    var isArray = __dependency2__.isArray;
+
+    /**
+      `RSVP.race` allows you to watch a series of promises and act as soon as the
+      first promise given to the `promises` argument fulfills or rejects.
+
+      Example:
+
+      ```javascript
+      var promise1 = new RSVP.Promise(function(resolve, reject){
+        setTimeout(function(){
+          resolve("promise 1");
+        }, 200);
+      });
+
+      var promise2 = new RSVP.Promise(function(resolve, reject){
+        setTimeout(function(){
+          resolve("promise 2");
+        }, 100);
+      });
+
+      RSVP.race([promise1, promise2]).then(function(result){
+        // result === "promise 2" because it was resolved before promise1
+        // was resolved.
+      });
+      ```
+
+      `RSVP.race` is deterministic in that only the state of the first completed
+      promise matters. For example, even if other promises given to the `promises`
+      array argument are resolved, but the first completed promise has become
+      rejected before the other promises became fulfilled, the returned promise
+      will become rejected:
+
+      ```javascript
+      var promise1 = new RSVP.Promise(function(resolve, reject){
+        setTimeout(function(){
+          resolve("promise 1");
+        }, 200);
+      });
+
+      var promise2 = new RSVP.Promise(function(resolve, reject){
+        setTimeout(function(){
+          reject(new Error("promise 2"));
+        }, 100);
+      });
+
+      RSVP.race([promise1, promise2]).then(function(result){
+        // Code here never runs because there are rejected promises!
+      }, function(reason){
+        // reason.message === "promise2" because promise 2 became rejected before
+        // promise 1 became fulfilled
+      });
+      ```
+
+      @method race
+      @for RSVP
+      @param {Array} promises array of promises to observe
+      @param {String} label optional string for describing the promise returned.
+      Useful for tooling.
+      @return {Promise} a promise that becomes fulfilled with the value the first
+      completed promises is resolved with if the first completed promise was
+      fulfilled, or rejected with the reason that the first completed promise
+      was rejected with.
+    */
+    function race(promises, label) {
+      if (!isArray(promises)) {
+        throw new TypeError('You must pass an array to race.');
+      }
+      return new Promise(function(resolve, reject) {
+        var results = [], promise;
+
+        for (var i = 0; i < promises.length; i++) {
+          promise = promises[i];
+
+          if (promise && typeof promise.then === 'function') {
+            promise.then(resolve, reject, "RSVP: RSVP#race");
+          } else {
+            resolve(promise);
+          }
+        }
+      }, label);
+    }
+
+    __exports__.race = race;
+  });
+define("rsvp/reject", 
+  ["./promise","exports"],
   function(__dependency1__, __exports__) {
     "use strict";
     var Promise = __dependency1__.Promise;
 
-    function reject(reason) {
+    /**
+      `RSVP.reject` returns a promise that will become rejected with the passed
+      `reason`. `RSVP.reject` is essentially shorthand for the following:
+
+      ```javascript
+      var promise = new RSVP.Promise(function(resolve, reject){
+        reject(new Error('WHOOPS'));
+      });
+
+      promise.then(function(value){
+        // Code here doesn't run because the promise is rejected!
+      }, function(reason){
+        // reason.message === 'WHOOPS'
+      });
+      ```
+
+      Instead of writing the above, your code now simply becomes the following:
+
+      ```javascript
+      var promise = RSVP.reject(new Error('WHOOPS'));
+
+      promise.then(function(value){
+        // Code here doesn't run because the promise is rejected!
+      }, function(reason){
+        // reason.message === 'WHOOPS'
+      });
+      ```
+
+      @method reject
+      @for RSVP
+      @param {Any} reason value that the returned promise will be rejected with.
+      @param {String} label optional string for identifying the returned promise.
+      Useful for tooling.
+      @return {Promise} a promise that will become rejected with the given
+      `reason`.
+    */
+    function reject(reason, label) {
       return new Promise(function (resolve, reject) {
         reject(reason);
-      });
+      }, label);
     }
-
 
     __exports__.reject = reject;
   });
-define("rsvp/resolve",
-  ["rsvp/promise","exports"],
+define("rsvp/resolve", 
+  ["./promise","exports"],
   function(__dependency1__, __exports__) {
     "use strict";
     var Promise = __dependency1__.Promise;
 
-    function resolve(thenable) {
-      return new Promise(function(resolve, reject) {
-        resolve(thenable);
-      });
-    }
+    /**
+      `RSVP.resolve` returns a promise that will become fulfilled with the passed
+      `value`. `RSVP.resolve` is essentially shorthand for the following:
 
+      ```javascript
+      var promise = new RSVP.Promise(function(resolve, reject){
+        resolve(1);
+      });
+
+      promise.then(function(value){
+        // value === 1
+      });
+      ```
+
+      Instead of writing the above, your code now simply becomes the following:
+
+      ```javascript
+      var promise = RSVP.resolve(1);
+
+      promise.then(function(value){
+        // value === 1
+      });
+      ```
+
+      @method resolve
+      @for RSVP
+      @param {Any} value value that the returned promise will be resolved with
+      @param {String} label optional string for identifying the returned promise.
+      Useful for tooling.
+      @return {Promise} a promise that will become fulfilled with the given
+      `value`
+    */
+    function resolve(value, label) {
+      return new Promise(function(resolve, reject) {
+        resolve(value);
+      }, label);
+    }
 
     __exports__.resolve = resolve;
   });
-define("rsvp/rethrow",
+define("rsvp/rethrow", 
   ["exports"],
   function(__exports__) {
     "use strict";
     var local = (typeof global === "undefined") ? this : global;
 
+    /**
+      `RSVP.rethrow` will rethrow an error on the next turn of the JavaScript event
+      loop in order to aid debugging.
+
+      Promises A+ specifies that any exceptions that occur with a promise must be
+      caught by the promises implementation and bubbled to the last handler. For
+      this reason, it is recommended that you always specify a second rejection
+      handler function to `then`. However, `RSVP.rethrow` will throw the exception
+      outside of the promise, so it bubbles up to your console if in the browser,
+      or domain/cause uncaught exception in Node. `rethrow` will throw the error
+      again so the error can be handled by the promise.
+
+      ```javascript
+      function throws(){
+        throw new Error('Whoops!');
+      }
+
+      var promise = new RSVP.Promise(function(resolve, reject){
+        throws();
+      });
+
+      promise.fail(RSVP.rethrow).then(function(){
+        // Code here doesn't run because the promise became rejected due to an
+        // error!
+      }, function (err){
+        // handle the error here
+      });
+      ```
+
+      The 'Whoops' error will be thrown on the next turn of the event loop
+      and you can watch for it in your console. You can also handle it using a
+      rejection handler given to `.then` or `.fail` on the returned promise.
+
+      @method rethrow
+      @for RSVP
+      @param {Error} reason reason the promise became rejected.
+      @throws Error
+    */
     function rethrow(reason) {
       local.setTimeout(function() {
         throw reason;
@@ -8361,40 +9158,79 @@ define("rsvp/rethrow",
       throw reason;
     }
 
-
     __exports__.rethrow = rethrow;
   });
-define("rsvp",
-  ["rsvp/events","rsvp/promise","rsvp/node","rsvp/all","rsvp/hash","rsvp/rethrow","rsvp/defer","rsvp/config","rsvp/resolve","rsvp/reject","exports"],
-  function(__dependency1__, __dependency2__, __dependency3__, __dependency4__, __dependency5__, __dependency6__, __dependency7__, __dependency8__, __dependency9__, __dependency10__, __exports__) {
+define("rsvp/utils", 
+  ["exports"],
+  function(__exports__) {
+    "use strict";
+    function objectOrFunction(x) {
+      return isFunction(x) || (typeof x === "object" && x !== null);
+    }
+
+    function isFunction(x) {
+      return typeof x === "function";
+    }
+
+    function isArray(x) {
+      return Object.prototype.toString.call(x) === "[object Array]";
+    }
+
+    // Date.now is not available in browsers < IE9
+    // https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Date/now#Compatibility
+    var now = Date.now || function() { return new Date().getTime(); };
+
+
+    __exports__.objectOrFunction = objectOrFunction;
+    __exports__.isFunction = isFunction;
+    __exports__.isArray = isArray;
+    __exports__.now = now;
+  });
+define("rsvp", 
+  ["./rsvp/events","./rsvp/promise","./rsvp/node","./rsvp/all","./rsvp/race","./rsvp/hash","./rsvp/rethrow","./rsvp/defer","./rsvp/config","./rsvp/resolve","./rsvp/reject", "exports"],
+  function(__dependency1__, __dependency2__, __dependency3__, __dependency4__, __dependency5__, __dependency6__, __dependency7__, __dependency8__, __dependency9__, __dependency10__, __dependency11__, __exports__) {
     "use strict";
     var EventTarget = __dependency1__.EventTarget;
     var Promise = __dependency2__.Promise;
     var denodeify = __dependency3__.denodeify;
     var all = __dependency4__.all;
-    var hash = __dependency5__.hash;
-    var rethrow = __dependency6__.rethrow;
-    var defer = __dependency7__.defer;
-    var config = __dependency8__.config;
-    var resolve = __dependency9__.resolve;
-    var reject = __dependency10__.reject;
+    var race = __dependency5__.race;
+    var hash = __dependency6__.hash;
+    var rethrow = __dependency7__.rethrow;
+    var defer = __dependency8__.defer;
+    var config = __dependency9__.config;
+    var configure = __dependency9__.configure;
+    var resolve = __dependency10__.resolve;
+    var reject = __dependency11__.reject;
 
-    function configure(name, value) {
-      config[name] = value;
+    function async(callback, arg) {
+      config.async(callback, arg);
     }
 
+    function on() {
+      config.on.apply(config, arguments);
+    }
+
+    function off() {
+      config.off.apply(config, arguments);
+    }
 
     __exports__.Promise = Promise;
     __exports__.EventTarget = EventTarget;
     __exports__.all = all;
+    __exports__.race = race;
     __exports__.hash = hash;
     __exports__.rethrow = rethrow;
     __exports__.defer = defer;
     __exports__.denodeify = denodeify;
     __exports__.configure = configure;
+    __exports__.on = on;
+    __exports__.off = off;
     __exports__.resolve = resolve;
     __exports__.reject = reject;
+    __exports__.async = async;
   });
+
 })();
 
 (function() {
@@ -8415,6 +9251,7 @@ Ember.MODEL_FACTORY_INJECTIONS = false || !!Ember.ENV.MODEL_FACTORY_INJECTIONS;
 define("container",
   [],
   function() {
+    "use strict";
 
     // A safe and simple inheriting object.
     function InheritingDict(parent) {
@@ -8535,7 +9372,8 @@ define("container",
 
       this.registry = new InheritingDict(parent && parent.registry);
       this.cache = new InheritingDict(parent && parent.cache);
-      this.factoryCache = new InheritingDict(parent && parent.cache);
+      this.factoryCache = new InheritingDict(parent && parent.factoryCache);
+      this.resolveCache = new InheritingDict(parent && parent.resolveCache);
       this.typeInjections = new InheritingDict(parent && parent.typeInjections);
       this.injections = {};
 
@@ -8656,9 +9494,7 @@ define("container",
         @param {Object} options
       */
       register: function(fullName, factory, options) {
-        if (fullName.indexOf(':') === -1) {
-          throw new TypeError("malformed fullName, expected: `type:name` got: " + fullName + "");
-        }
+        validateFullName(fullName);
 
         if (factory === undefined) {
           throw new TypeError('Attempting to register an unknown factory: `' + fullName + '`');
@@ -8691,11 +9527,14 @@ define("container",
         @param {String} fullName
        */
       unregister: function(fullName) {
+        validateFullName(fullName);
+
         var normalizedName = this.normalize(fullName);
 
         this.registry.remove(normalizedName);
         this.cache.remove(normalizedName);
         this.factoryCache.remove(normalizedName);
+        this.resolveCache.remove(normalizedName);
         this._options.remove(normalizedName);
       },
 
@@ -8732,7 +9571,18 @@ define("container",
         @return {Function} fullName's factory
       */
       resolve: function(fullName) {
-        return this.resolver(fullName) || this.registry.get(fullName);
+        validateFullName(fullName);
+
+        var normalizedName = this.normalize(fullName);
+        var cached = this.resolveCache.get(normalizedName);
+
+        if (cached) { return cached; }
+
+        var resolved = this.resolver(normalizedName) || this.registry.get(normalizedName);
+
+        this.resolveCache.set(normalizedName, resolved);
+
+        return resolved;
       },
 
       /**
@@ -8811,23 +9661,8 @@ define("container",
         @return {any}
       */
       lookup: function(fullName, options) {
-        fullName = this.normalize(fullName);
-
-        options = options || {};
-
-        if (this.cache.has(fullName) && options.singleton !== false) {
-          return this.cache.get(fullName);
-        }
-
-        var value = instantiate(this, fullName);
-
-        if (value === undefined) { return; }
-
-        if (isSingleton(this, fullName) && options.singleton !== false) {
-          this.cache.set(fullName, value);
-        }
-
-        return value;
+        validateFullName(fullName);
+        return lookup(this, this.normalize(fullName), options);
       },
 
       /**
@@ -8838,7 +9673,8 @@ define("container",
         @return {any}
       */
       lookupFactory: function(fullName) {
-        return factoryFor(this, fullName);
+        validateFullName(fullName);
+        return factoryFor(this, this.normalize(fullName));
       },
 
       /**
@@ -8850,11 +9686,8 @@ define("container",
         @return {Boolean}
       */
       has: function(fullName) {
-        if (this.cache.has(fullName)) {
-          return true;
-        }
-
-        return !!factoryFor(this, fullName);
+        validateFullName(fullName);
+        return has(this, this.normalize(fullName));
       },
 
       /**
@@ -8936,6 +9769,7 @@ define("container",
         @param {String} fullName
       */
       typeInjection: function(type, property, fullName) {
+        validateFullName(fullName);
         if (this.parent) { illegalChildOperation('typeInjection'); }
 
         addTypeInjection(this.typeInjections, type, property, fullName);
@@ -8985,14 +9819,20 @@ define("container",
         @param {String} property
         @param {String} injectionName
       */
-      injection: function(factoryName, property, injectionName) {
+      injection: function(fullName, property, injectionName) {
         if (this.parent) { illegalChildOperation('injection'); }
 
-        if (factoryName.indexOf(':') === -1) {
-          return this.typeInjection(factoryName, property, injectionName);
+        validateFullName(injectionName);
+        var normalizedInjectionName = this.normalize(injectionName);
+
+        if (fullName.indexOf(':') === -1) {
+          return this.typeInjection(fullName, property, normalizedInjectionName);
         }
 
-        addInjection(this.injections, factoryName, property, injectionName);
+        validateFullName(fullName);
+        var normalizedName = this.normalize(fullName);
+
+        addInjection(this.injections, normalizedName, property, normalizedInjectionName);
       },
 
 
@@ -9029,7 +9869,7 @@ define("container",
       factoryTypeInjection: function(type, property, fullName) {
         if (this.parent) { illegalChildOperation('factoryTypeInjection'); }
 
-        addTypeInjection(this.factoryTypeInjections, type, property, fullName);
+        addTypeInjection(this.factoryTypeInjections, type, property, this.normalize(fullName));
       },
 
       /**
@@ -9081,14 +9921,21 @@ define("container",
         @param {String} property
         @param {String} injectionName
       */
-      factoryInjection: function(factoryName, property, injectionName) {
+      factoryInjection: function(fullName, property, injectionName) {
         if (this.parent) { illegalChildOperation('injection'); }
 
-        if (factoryName.indexOf(':') === -1) {
-          return this.factoryTypeInjection(factoryName, property, injectionName);
+        var normalizedName = this.normalize(fullName);
+        var normalizedInjectionName = this.normalize(injectionName);
+
+        validateFullName(injectionName);
+
+        if (fullName.indexOf(':') === -1) {
+          return this.factoryTypeInjection(normalizedName, property, normalizedInjectionName);
         }
 
-        addInjection(this.factoryInjections, factoryName, property, injectionName);
+        validateFullName(fullName);
+
+        addInjection(this.factoryInjections, normalizedName, property, normalizedInjectionName);
       },
 
       /**
@@ -9098,8 +9945,6 @@ define("container",
         @method destroy
       */
       destroy: function() {
-        this.isDestroyed = true;
-
         for (var i=0, l=this.children.length; i<l; i++) {
           this.children[i].destroy();
         }
@@ -9125,6 +9970,32 @@ define("container",
       }
     };
 
+    function has(container, fullName){
+      if (container.cache.has(fullName)) {
+        return true;
+      }
+
+      return !!container.resolve(fullName);
+    }
+
+    function lookup(container, fullName, options) {
+      options = options || {};
+
+      if (container.cache.has(fullName) && options.singleton !== false) {
+        return container.cache.get(fullName);
+      }
+
+      var value = instantiate(container, fullName);
+
+      if (value === undefined) { return; }
+
+      if (isSingleton(container, fullName) && options.singleton !== false) {
+        container.cache.set(fullName, value);
+      }
+
+      return value;
+    }
+
     function illegalChildOperation(operation) {
       throw new Error(operation + " is not currently supported on child containers");
     }
@@ -9140,14 +10011,14 @@ define("container",
 
       if (!injections) { return hash; }
 
-      var injection, lookup;
+      var injection, injectable;
 
       for (var i=0, l=injections.length; i<l; i++) {
         injection = injections[i];
-        lookup = container.lookup(injection.fullName);
+        injectable = lookup(container, injection.fullName);
 
-        if (lookup !== undefined) {
-          hash[injection.property] = lookup;
+        if (injectable !== undefined) {
+          hash[injection.property] = injectable;
         } else {
           throw new Error('Attempting to inject an unknown injection: `' + injection.fullName + '`');
         }
@@ -9172,7 +10043,7 @@ define("container",
     }
 
     function factoryFor(container, fullName) {
-      var name = container.normalize(fullName);
+      var name = fullName;
       var factory = container.resolve(name);
       var injectedFactory;
       var cache = container.factoryCache;
@@ -9280,6 +10151,13 @@ define("container",
         property: property,
         fullName: fullName
       });
+    }
+
+    var VALID_FULL_NAME_REGEXP = /^[^:]+.+:[^:]+$/;
+    function validateFullName(fullName) {
+      if (!VALID_FULL_NAME_REGEXP.test(fullName)) {
+        throw new TypeError('Invalid Fullname, expected: `type:name` got: ' + fullName);
+      }
     }
 
     function addInjection(rules, factoryName, property, injectionName) {
@@ -9473,39 +10351,6 @@ Ember.copy = function(obj, deep) {
   if ('object' !== typeof obj || obj===null) return obj; // can't copy primitives
   if (Ember.Copyable && Ember.Copyable.detect(obj)) return obj.copy(deep);
   return _copy(obj, deep, deep ? [] : null, deep ? [] : null);
-};
-
-/**
-  Convenience method to inspect an object. This method will attempt to
-  convert the object into a useful string description.
-
-  It is a pretty simple implementation. If you want something more robust,
-  use something like JSDump: https://github.com/NV/jsDump
-
-  @method inspect
-  @for Ember
-  @param {Object} obj The object you want to inspect.
-  @return {String} A description of the object
-*/
-Ember.inspect = function(obj) {
-  var type = Ember.typeOf(obj);
-  if (type === 'array') {
-    return '[' + obj + ']';
-  }
-  if (type !== 'object') {
-    return obj + '';
-  }
-
-  var v, ret = [];
-  for(var key in obj) {
-    if (obj.hasOwnProperty(key)) {
-      v = obj[key];
-      if (v === 'toString') { continue; } // ignore useless items
-      if (Ember.typeOf(v) === 'function') { v = "function() { ... }"; }
-      ret.push(key + ": " + v);
-    }
-  }
-  return "{" + ret.join(", ") + "}";
 };
 
 /**
@@ -10575,12 +11420,14 @@ function makeCtor() {
         var properties = props[i];
 
 
-        if (properties === null || typeof properties !== 'object') {
-
-          continue;
+        if (typeof properties !== 'object' && properties !== undefined) {
+          throw new Ember.Error("Ember.Object.create only accepts objects.");
         }
 
+        if (!properties) { continue; }
+
         var keyNames = Ember.keys(properties);
+
         for (var j = 0, ll = keyNames.length; j < ll; j++) {
           var keyName = keyNames[j];
           if (!properties.hasOwnProperty(keyName)) { continue; }
@@ -11689,7 +12536,7 @@ function iter(key, value) {
      with an `Ember.Object` subclass, you should be sure to change the length
      property using `set().`
 
-  2. If you must implement `nextObject().` See documentation.
+  2. You must implement `nextObject().` See documentation.
 
   Once you have these two methods implement, apply the `Ember.Enumerable` mixin
   to your class and you will be able to enumerate the contents of your object
@@ -12253,9 +13100,11 @@ Ember.Enumerable = Ember.Mixin.create({
     @return {Boolean} `true` if the passed function returns `true` for any item
   */
   any: function(callback, target) {
-    return !!this.find(function(x, idx, i) {
+    var found = this.find(function(x, idx, i) {
       return !!callback.call(target, x, idx, i);
     });
+
+    return typeof found !== 'undefined';
   },
 
   /**
@@ -12364,7 +13213,7 @@ Ember.Enumerable = Ember.Mixin.create({
     var ret = initialValue;
 
     this.forEach(function(item, i) {
-      ret = callback.call(null, ret, item, i, this, reducerProperty);
+      ret = callback(ret, item, i, this, reducerProperty);
     }, this);
 
     return ret;
@@ -12387,7 +13236,7 @@ Ember.Enumerable = Ember.Mixin.create({
     this.forEach(function(x, idx) {
       var method = x && x[methodName];
       if ('function' === typeof method) {
-        ret[idx] = args ? method.apply(x, args) : method.call(x);
+        ret[idx] = args ? method.apply(x, args) : x[methodName]();
       }
     }, this);
 
@@ -12611,38 +13460,33 @@ Ember.Enumerable = Ember.Mixin.create({
     Ember.propertyDidChange(this, '[]');
 
     return this ;
-  }
+  },
 
-});
+  /**
+    Converts the enumerable into an array and sorts by the keys
+    specified in the argument.
 
+    You may provide multiple arguments to sort by multiple properties.
 
-  Ember.Enumerable.reopen({
-    /**
-      Converts the enumerable into an array and sorts by the keys
-      specified in the argument.
-
-      You may provide multiple arguments to sort by multiple properties.
-
-      @method sortBy
-      @param {String} property name(s) to sort on
-      @return {Array} The sorted array.
+    @method sortBy
+    @param {String} property name(s) to sort on
+    @return {Array} The sorted array.
     */
-    sortBy: function() {
-      var sortKeys = arguments;
-      return this.toArray().sort(function(a, b){
-        for(var i = 0; i < sortKeys.length; i++) {
-          var key = sortKeys[i],
-              propA = get(a, key),
-              propB = get(b, key);
-          // return 1 or -1 else continue to the next sortKey
-          var compareValue = Ember.compare(propA, propB);
-          if (compareValue) { return compareValue; }
-        }
-        return 0;
-      });
-    }
-  });
-
+  sortBy: function() {
+    var sortKeys = arguments;
+    return this.toArray().sort(function(a, b){
+      for(var i = 0; i < sortKeys.length; i++) {
+        var key = sortKeys[i],
+        propA = get(a, key),
+        propB = get(b, key);
+        // return 1 or -1 else continue to the next sortKey
+        var compareValue = Ember.compare(propA, propB);
+        if (compareValue) { return compareValue; }
+      }
+      return 0;
+    });
+  }
+});
 
 })();
 
@@ -12798,7 +13642,7 @@ Ember.Array = Ember.Mixin.create(Ember.Enumerable, /** @scope Ember.Array.protot
 
     @method slice
     @param {Integer} beginIndex (Optional) index to begin slicing from.
-    @param {Integer} endIndex (Optional) index to end the slice at.
+    @param {Integer} endIndex (Optional) index to end the slice at (but not included).
     @return {Array} New array with specified slice
   */
   slice: function(beginIndex, endIndex) {
@@ -13098,12 +13942,14 @@ var e_get = Ember.get,
     doubleEachPropertyPattern = /(.*\.@each){2,}/,
     arrayBracketPattern = /\.\[\]$/;
 
+if (Ember.FEATURES.isEnabled('propertyBraceExpansion')) {
+  var expandProperties = Ember.expandProperties;
+}
+
 function get(obj, key) {
-  
-    if (key === '@this') {
-      return obj;
-    }
-  
+  if (key === '@this') {
+    return obj;
+  }
 
   return e_get(obj, key);
 }
@@ -13556,9 +14402,9 @@ function ReduceComputedProperty(options) {
 
     meta.dependentArraysObserver.suspendArrayObservers(function () {
       forEach(cp._dependentKeys, function (dependentKey) {
-        if (Ember.FEATURES.isEnabled('reduceComputed-non-array-dependencies')) {
+        
           if (!partiallyRecomputeFor(this, dependentKey)) { return; }
-        }
+        
 
         var dependentArray = get(this, dependentKey),
             previousDependentArray = meta.dependentArrays[dependentKey];
@@ -13587,9 +14433,9 @@ function ReduceComputedProperty(options) {
     }, this);
 
     forEach(cp._dependentKeys, function(dependentKey) {
-      if (Ember.FEATURES.isEnabled('reduceComputed-non-array-dependencies')) {
+      
         if (!partiallyRecomputeFor(this, dependentKey)) { return; }
-      }
+      
 
       var dependentArray = get(this, dependentKey);
       if (dependentArray) {
@@ -13683,8 +14529,18 @@ ReduceComputedProperty.prototype.property = function () {
       throw new Ember.Error("Nested @each properties not supported: " + dependentKey);
     } else if (match = eachPropertyPattern.exec(dependentKey)) {
       dependentArrayKey = match[1];
-      itemPropertyKey = match[2];
-      cp.itemPropertyKey(dependentArrayKey, itemPropertyKey);
+
+      if (Ember.FEATURES.isEnabled('propertyBraceExpansion')) {
+        var itemPropertyKeyPattern = match[2],
+            addItemPropertyKey = function (itemPropertyKey) {
+              cp.itemPropertyKey(dependentArrayKey, itemPropertyKey);
+            };
+
+        expandProperties(itemPropertyKeyPattern, addItemPropertyKey);
+      } else {
+        itemPropertyKey = match[2];
+        cp.itemPropertyKey(dependentArrayKey, itemPropertyKey);
+      }
       propertyArgs.add(dependentArrayKey);
     } else {
       propertyArgs.add(dependentKey);
@@ -13692,6 +14548,7 @@ ReduceComputedProperty.prototype.property = function () {
   });
 
   return ComputedProperty.prototype.property.apply(this, propertyArgs.toArray());
+
 };
 
 /**
@@ -13794,7 +14651,7 @@ ReduceComputedProperty.prototype.property = function () {
 
   ```javascript
   Ember.computed.max = function (dependentKey) {
-    return Ember.reduceComputed.call(null, dependentKey, {
+    return Ember.reduceComputed(dependentKey, {
       initialValue: -Infinity,
 
       addedItem: function (accumulatedValue, item, changeMeta, instanceMeta) {
@@ -14125,7 +14982,7 @@ var get = Ember.get,
   @return {Ember.ComputedProperty} computes the largest value in the dependentKey's array
 */
 Ember.computed.max = function (dependentKey) {
-  return Ember.reduceComputed.call(null, dependentKey, {
+  return Ember.reduceComputed(dependentKey, {
     initialValue: -Infinity,
 
     addedItem: function (accumulatedValue, item, changeMeta, instanceMeta) {
@@ -14167,7 +15024,7 @@ Ember.computed.max = function (dependentKey) {
   @return {Ember.ComputedProperty} computes the smallest value in the dependentKey's array
 */
 Ember.computed.min = function (dependentKey) {
-  return Ember.reduceComputed.call(null, dependentKey, {
+  return Ember.reduceComputed(dependentKey, {
     initialValue: Infinity,
 
     addedItem: function (accumulatedValue, item, changeMeta, instanceMeta) {
@@ -14196,14 +15053,14 @@ Ember.computed.min = function (dependentKey) {
   Example
 
   ```javascript
-  App.Hampster = Ember.Object.extend({
+  App.Hamster = Ember.Object.extend({
     excitingChores: Ember.computed.map('chores', function(chore) {
       return chore.toUpperCase() + '!';
     })
   });
 
-  var hampster = App.Hampster.create({chores: ['cook', 'clean', 'write more unit tests']});
-  hampster.get('excitingChores'); // ['COOK!', 'CLEAN!', 'WRITE MORE UNIT TESTS!']
+  var hamster = App.Hamster.create({chores: ['cook', 'clean', 'write more unit tests']});
+  hamster.get('excitingChores'); // ['COOK!', 'CLEAN!', 'WRITE MORE UNIT TESTS!']
   ```
 
   @method computed.map
@@ -14280,18 +15137,18 @@ Ember.computed.mapProperty = Ember.computed.mapBy;
   Example
 
   ```javascript
-  App.Hampster = Ember.Object.extend({
+  App.Hamster = Ember.Object.extend({
     remainingChores: Ember.computed.filter('chores', function(chore) {
       return !chore.done;
     })
   });
 
-  var hampster = App.Hampster.create({chores: [
+  var hamster = App.Hamster.create({chores: [
     {name: 'cook', done: true},
     {name: 'clean', done: true},
     {name: 'write more unit tests', done: false}
   ]});
-  hampster.get('remainingChores'); // [{name: 'write more unit tests', done: false}]
+  hamster.get('remainingChores'); // [{name: 'write more unit tests', done: false}]
   ```
 
   @method computed.filter
@@ -14337,16 +15194,16 @@ Ember.computed.filter = function(dependentKey, callback) {
   Example
 
   ```javascript
-  App.Hampster = Ember.Object.extend({
+  App.Hamster = Ember.Object.extend({
     remainingChores: Ember.computed.filterBy('chores', 'done', false)
   });
 
-  var hampster = App.Hampster.create({chores: [
+  var hamster = App.Hamster.create({chores: [
     {name: 'cook', done: true},
     {name: 'clean', done: true},
     {name: 'write more unit tests', done: false}
   ]});
-  hampster.get('remainingChores'); // [{name: 'write more unit tests', done: false}]
+  hamster.get('remainingChores'); // [{name: 'write more unit tests', done: false}]
   ```
 
   @method computed.filterBy
@@ -14389,17 +15246,17 @@ Ember.computed.filterProperty = Ember.computed.filterBy;
   Example
 
   ```javascript
-  App.Hampster = Ember.Object.extend({
+  App.Hamster = Ember.Object.extend({
     uniqueFruits: Ember.computed.uniq('fruits')
   });
 
-  var hampster = App.Hampster.create({fruits: [
+  var hamster = App.Hamster.create({fruits: [
     'banana',
     'grape',
     'kale',
     'banana'
   ]});
-  hampster.get('uniqueFruits'); // ['banana', 'grape', 'kale']
+  hamster.get('uniqueFruits'); // ['banana', 'grape', 'kale']
   ```
 
   @method computed.uniq
@@ -14534,16 +15391,16 @@ Ember.computed.intersect = function () {
   Example
 
   ```javascript
-  App.Hampster = Ember.Object.extend({
+  App.Hamster = Ember.Object.extend({
     likes: ['banana', 'grape', 'kale'],
     wants: Ember.computed.setDiff('likes', 'fruits')
   });
 
-  var hampster = App.Hampster.create({fruits: [
+  var hamster = App.Hamster.create({fruits: [
     'grape',
     'kale',
   ]});
-  hampster.get('wants'); // ['banana']
+  hamster.get('wants'); // ['banana']
   ```
 
   @method computed.setDiff
@@ -14558,7 +15415,7 @@ Ember.computed.setDiff = function (setAProperty, setBProperty) {
   if (arguments.length !== 2) {
     throw new Ember.Error("setDiff requires exactly two dependent arrays.");
   }
-  return Ember.arrayComputed.call(null, setAProperty, setBProperty, {
+  return Ember.arrayComputed(setAProperty, setBProperty, {
     addedItem: function (array, item, changeMeta, instanceMeta) {
       var setA = get(this, setAProperty),
           setB = get(this, setBProperty);
@@ -14759,7 +15616,7 @@ Ember.computed.sort = function (itemsKey, sortDefinition) {
     };
   }
 
-  return Ember.arrayComputed.call(null, itemsKey, {
+  return Ember.arrayComputed(itemsKey, {
     initialize: initFn,
 
     addedItem: function (array, item, changeMeta, instanceMeta) {
@@ -14791,16 +15648,24 @@ Ember.computed.sort = function (itemsKey, sortDefinition) {
 
 
 (function() {
-/**
-  Expose RSVP implementation
-  
-  Documentation can be found here: https://github.com/tildeio/rsvp.js/blob/master/README.md
-
-  @class RSVP
-  @namespace Ember
-  @constructor
-*/
 Ember.RSVP = requireModule('rsvp');
+
+Ember.RSVP.onerrorDefault = function(error) {
+  if (error instanceof Error) {
+    if (Ember.testing) {
+      if (Ember.Test && Ember.Test.adapter) {
+        Ember.Test.adapter.exception(error);
+      } else {
+        throw error;
+      }
+    } else {
+      Ember.Logger.error(error.stack);
+
+    }
+  }
+};
+
+Ember.RSVP.on('error', Ember.RSVP.onerrorDefault);
 
 })();
 
@@ -14813,6 +15678,10 @@ Ember.RSVP = requireModule('rsvp');
 */
 
 var a_slice = Array.prototype.slice;
+
+if (Ember.FEATURES.isEnabled('propertyBraceExpansion')) {
+  var expandProperties = Ember.expandProperties;
+}
 
 if (Ember.EXTEND_PROTOTYPES === true || Ember.EXTEND_PROTOTYPES.Function) {
 
@@ -14878,6 +15747,8 @@ if (Ember.EXTEND_PROTOTYPES === true || Ember.EXTEND_PROTOTYPES.Function) {
   */
   Function.prototype.property = function() {
     var ret = Ember.computed(this);
+    // ComputedProperty.prototype.property expands properties; no need for us to
+    // do so here.
     return ret.property.apply(ret, arguments);
   };
 
@@ -14907,7 +15778,19 @@ if (Ember.EXTEND_PROTOTYPES === true || Ember.EXTEND_PROTOTYPES.Function) {
     @for Function
   */
   Function.prototype.observes = function() {
-    this.__ember_observes__ = a_slice.call(arguments);
+    if (Ember.FEATURES.isEnabled('propertyBraceExpansion')) {
+      var addWatchedProperty = function (obs) { watched.push(obs); };
+      var watched = [];
+
+      for (var i=0; i<arguments.length; ++i) {
+        expandProperties(arguments[i], addWatchedProperty);
+      }
+
+      this.__ember_observes__ = watched;
+    } else {
+      this.__ember_observes__ = a_slice.call(arguments);
+    }
+
     return this;
   };
 
@@ -14942,6 +15825,7 @@ if (Ember.EXTEND_PROTOTYPES === true || Ember.EXTEND_PROTOTYPES.Function) {
 
     }
 
+    // observes handles property expansion
     return this.observes.apply(this, arguments);
   };
 
@@ -14968,7 +15852,19 @@ if (Ember.EXTEND_PROTOTYPES === true || Ember.EXTEND_PROTOTYPES.Function) {
     @for Function
   */
   Function.prototype.observesBefore = function() {
-    this.__ember_observesBefore__ = a_slice.call(arguments);
+    if (Ember.FEATURES.isEnabled('propertyBraceExpansion')) {
+      var addWatchedProperty = function (obs) { watched.push(obs); };
+      var watched = [];
+
+      for (var i=0; i<arguments.length; ++i) {
+        expandProperties(arguments[i], addWatchedProperty);
+      }
+
+      this.__ember_observesBefore__ = watched;
+    } else {
+      this.__ember_observesBefore__ = a_slice.call(arguments);
+    }
+
     return this;
   };
 
@@ -15167,7 +16063,7 @@ var get = Ember.get, set = Ember.set;
 
   });
 
-  c = Context.create({ firstName: "John", lastName: "Doe" });
+  c = Contact.create({ firstName: "John", lastName: "Doe" });
   c.swapNames();  // returns c
   c.freeze();
   c.swapNames();  // EXCEPTION
@@ -16048,6 +16944,8 @@ Ember.ActionHandler = Ember.Mixin.create({
     var hashName;
 
     if (!props._actions) {
+
+
       if (typeOf(props.actions) === 'object') {
         hashName = 'actions';
       } else if (typeOf(props.events) === 'object') {
@@ -16094,8 +16992,6 @@ Ember.ActionHandler = Ember.Mixin.create({
 
 (function() {
 var set = Ember.set, get = Ember.get,
-    resolve = Ember.RSVP.resolve,
-    rethrow = Ember.RSVP.rethrow,
     not = Ember.computed.not,
     or = Ember.computed.or;
 
@@ -16104,14 +17000,15 @@ var set = Ember.set, get = Ember.get,
   @submodule ember-runtime
  */
 
-function observePromise(proxy, promise) {
-  promise.then(function(value) {
+function tap(proxy, promise) {
+  return promise.then(function(value) {
     set(proxy, 'isFulfilled', true);
     set(proxy, 'content', value);
+    return value;
   }, function(reason) {
     set(proxy, 'isRejected', true);
     set(proxy, 'reason', reason);
-    // don't re-throw, as we are merely observing
+    throw reason;
   });
 }
 
@@ -16189,9 +17086,7 @@ Ember.PromiseProxyMixin = Ember.Mixin.create({
 
   promise: Ember.computed(function(key, promise) {
     if (arguments.length === 2) {
-      promise = resolve(promise);
-      observePromise(this, promise);
-      return promise.then(); // fork the promise.
+      return tap(this, promise);
     } else {
       throw new Ember.Error("PromiseProxy's promise must be set");
     }

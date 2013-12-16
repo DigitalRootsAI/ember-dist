@@ -508,7 +508,7 @@ DeprecatedContainer.prototype = {
   App = Ember.Application.create({
     customEvents: {
       // add support for the paste event
-      'paste: "paste"
+      paste: "paste"
     }
   });
   ```
@@ -630,7 +630,7 @@ var Application = Ember.Application = Ember.Namespace.extend(Ember.DeferredMixin
     App = Ember.Application.create({
       customEvents: {
         // add support for the paste event
-        'paste: "paste"
+        paste: "paste"
       }
     });
     ```
@@ -744,7 +744,7 @@ var Application = Ember.Application = Ember.Namespace.extend(Ember.DeferredMixin
     if (!this.$ || this.$.isReady) {
       Ember.run.schedule('actions', self, '_initialize');
     } else {
-      this.$().ready(function() {
+      this.$().ready(function runInitialize() {
         Ember.run(self, '_initialize');
       });
     }
@@ -831,9 +831,15 @@ var Application = Ember.Application = Ember.Namespace.extend(Ember.DeferredMixin
 
     ```javascript
     App.inject(<full_name or type>, <property name>, <full_name>)
-    App.inject('model:user', 'email', 'model:email')
-    App.inject('model', 'source', 'source:main')
+    App.inject('controller:application', 'email', 'model:email')
+    App.inject('controller', 'source', 'source:main')
     ```
+    Please note that injections on models are currently disabled. 
+    This was done because ember-data was not ready for fully a container aware ecosystem.
+    
+    You can enable injections on models by setting `Ember.MODEL_FACTORY_INJECTIONS` flag to `true`
+    If model factory injections are enabled, models should not be
+    accessed globally (only through `container.lookupFactory('model:modelName'))`);
 
     @method inject
     @param  factoryNameOrType {String}
@@ -1155,10 +1161,7 @@ Ember.Application.reopenClass({
     container.optionsForType('component', { singleton: false });
     container.optionsForType('view', { singleton: false });
     container.optionsForType('template', { instantiate: false });
-
-    if (Ember.FEATURES.isEnabled('container-renderables')) {
-      container.optionsForType('helper', { instantiate: false });
-    }
+    container.optionsForType('helper', { instantiate: false });
 
     container.register('application:main', namespace, { instantiate: false });
 
@@ -1170,6 +1173,10 @@ Ember.Application.reopenClass({
 
     container.register('router:main',  Ember.Router);
     container.injection('router:main', 'namespace', 'application:main');
+
+    container.register('location:hash', Ember.HashLocation);
+    container.register('location:history', Ember.HistoryLocation);
+    container.register('location:none', Ember.NoneLocation);
 
     container.injection('controller', 'target', 'router:main');
     container.injection('controller', 'namespace', 'application:main');
@@ -1256,6 +1263,9 @@ function verifyNeedsDependencies(controller, container, needs) {
 
   for (i=0, l=needs.length; i<l; i++) {
     dependency = needs[i];
+
+    Ember.assert(Ember.inspect(controller) + "#needs must not specify dependencies with periods in their names (" + dependency + ")", dependency.indexOf('.') === -1);
+
     if (dependency.indexOf(':') === -1) {
       dependency = "controller:" + dependency;
     }
@@ -1293,6 +1303,27 @@ Ember.ControllerMixin.reopen({
 
     ```javascript
     this.get('controllers.post'); // instance of App.PostController
+    ```
+
+    Given that you have a nested controller (nested resource):
+
+    ```javascript
+    App.CommentsNewController = Ember.ObjectController.extend({
+    });
+    ```
+
+    When you define a controller that requires access to a nested one:
+
+    ```javascript
+    App.IndexController = Ember.ObjectController.extend({
+      needs: ['commentsNew']
+    });
+    ```
+
+    You will be able to get access to it:
+
+    ```javascript
+    this.get('controllers.commentsNew'); // instance of App.CommentsNewController
     ```
 
     This is only available for singleton controllers.
@@ -1365,6 +1396,9 @@ Ember.ControllerMixin.reopen({
 
         var errorMessage = Ember.inspect(controller) + '#needs does not include `' + controllerName + '`. To access the ' + controllerName + ' controller from ' + Ember.inspect(controller) + ', ' + Ember.inspect(controller) + ' should have a `needs` property that is an array of the controllers it has access to.';
         throw new ReferenceError(errorMessage);
+      },
+      setUnknownProperty: function (key, value) {
+        throw new Error("You cannot overwrite the value of `controllers." + key + "` of " + Ember.inspect(controller));
       }
     };
   }).readOnly()
