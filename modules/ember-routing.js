@@ -3707,10 +3707,13 @@ Ember.Route = Ember.Object.extend(Ember.ActionHandler, {
   },
 
   /**
-    Returns the current model for a given route.
-
-    This is the object returned by the `model` hook of the route
-    in question.
+    Returns the model of a parent (or any ancestor) route
+    in a route hierarchy.  During a transition, all routes
+    must resolve a model object, and if a route
+    needs access to a parent route's model in order to
+    resolve a model (or just reuse the model from a parent),
+    it can call `this.modelFor(theNameOfParentRoute)` to
+    retrieve it.
 
     Example
 
@@ -5506,8 +5509,8 @@ Ember.ControllerMixin.reopen({
     be either a single route or route path:
 
     ```javascript
-      aController.transitionToRoute('blogPosts');
-      aController.transitionToRoute('blogPosts.recentEntries');
+    aController.transitionToRoute('blogPosts');
+    aController.transitionToRoute('blogPosts.recentEntries');
     ```
 
     Optionally supply a model for the route in question. The model
@@ -5515,19 +5518,18 @@ Ember.ControllerMixin.reopen({
     the route:
 
     ```javascript
-      aController.transitionToRoute('blogPost', aPost);
+    aController.transitionToRoute('blogPost', aPost);
     ```
 
     Multiple models will be applied last to first recursively up the
     resource tree.
 
     ```javascript
+    this.resource('blogPost', {path:':blogPostId'}, function(){
+      this.resource('blogComment', {path: ':blogCommentId'});
+    });
 
-      this.resource('blogPost', {path:':blogPostId'}, function(){
-        this.resource('blogComment', {path: ':blogCommentId'});
-      });
-      
-      aController.transitionToRoute('blogComment', aPost, aComment);
+    aController.transitionToRoute('blogComment', aPost, aComment);
     ```
 
     See also 'replaceRoute'.
@@ -5561,8 +5563,8 @@ Ember.ControllerMixin.reopen({
     Beside that, it is identical to `transitionToRoute` in all other respects.
 
     ```javascript
-      aController.replaceRoute('blogPosts');
-      aController.replaceRoute('blogPosts.recentEntries');
+    aController.replaceRoute('blogPosts');
+    aController.replaceRoute('blogPosts.recentEntries');
     ```
 
     Optionally supply a model for the route in question. The model
@@ -5570,19 +5572,18 @@ Ember.ControllerMixin.reopen({
     the route:
 
     ```javascript
-      aController.replaceRoute('blogPost', aPost);
+    aController.replaceRoute('blogPost', aPost);
     ```
 
     Multiple models will be applied last to first recursively up the
     resource tree.
 
     ```javascript
+    this.resource('blogPost', {path:':blogPostId'}, function(){
+      this.resource('blogComment', {path: ':blogCommentId'});
+    });
 
-      this.resource('blogPost', {path:':blogPostId'}, function(){
-        this.resource('blogComment', {path: ':blogCommentId'});
-      });
-      
-      aController.replaceRoute('blogComment', aPost, aComment);
+    aController.replaceRoute('blogComment', aPost, aComment);
     ```
 
     @param {String} name the name of the route
