@@ -28,19 +28,20 @@ Ember.Test = {
     the first parameter.
 
     For example:
+
     ```javascript
-      Ember.Test.registerHelper('boot', function(app) {
-        Ember.run(app, app.advanceReadiness);
-      });
+    Ember.Test.registerHelper('boot', function(app) {
+      Ember.run(app, app.advanceReadiness);
+    });
     ```
 
     This helper can later be called without arguments because it will be
     called with `app` as the first parameter.
 
     ```javascript
-      App = Ember.Application.create();
-      App.injectTestHelpers();
-      boot();
+    App = Ember.Application.create();
+    App.injectTestHelpers();
+    boot();
     ```
 
     @public
@@ -64,10 +65,11 @@ Ember.Test = {
     the first parameter.
 
     For example:
+
     ```javascript
-      Ember.Test.registerAsyncHelper('boot', function(app) {
-        Ember.run(app, app.advanceReadiness);
-      });
+    Ember.Test.registerAsyncHelper('boot', function(app) {
+      Ember.run(app, app.advanceReadiness);
+    });
     ```
 
     The advantage of an async helper is that it will not run
@@ -76,16 +78,17 @@ Ember.Test = {
 
 
     For example:
-    ```javascript
-      Ember.Test.registerAsyncHelper('deletePost', function(app, postId) {
-        click('.delete-' + postId);
-      });
 
-      // ... in your test
-      visit('/post/2');
-      deletePost(2);
-      visit('/post/3');
-      deletePost(3);
+    ```javascript
+    Ember.Test.registerAsyncHelper('deletePost', function(app, postId) {
+      click('.delete-' + postId);
+    });
+
+    // ... in your test
+    visit('/post/2');
+    deletePost(2);
+    visit('/post/3');
+    deletePost(3);
     ```
 
     @public
@@ -104,6 +107,7 @@ Ember.Test = {
     Remove a previously added helper method.
 
     Example:
+
     ```
     Ember.Test.unregisterHelper('wait');
     ```
@@ -166,6 +170,7 @@ Ember.Test = {
    You can manually set it before calling `App.setupForTesting()`.
 
    Example:
+
    ```
    Ember.Test.adapter = MyCustomAdapter.create()
    ```
@@ -195,8 +200,6 @@ Ember.Test = {
   },
 
   /**
-   @public
-
      This allows ember-testing to play nicely with other asynchronous
      events, such as an application that is waiting for a CSS3
      transition or an IndexDB transaction.
@@ -341,6 +344,7 @@ Ember.Application.reopen({
    with your testing framework).
 
    Example:
+
   ```
   App.setupForTesting();
   ```
@@ -417,7 +421,8 @@ Ember.Application.reopen({
     that were overridden by the helpers.
 
     Example:
-    ```
+
+    ```javascript
     App.removeTestHelpers();
     ```
 
@@ -693,7 +698,10 @@ Test.onInjectHelpers(function() {
   });
 
   Ember.$(document).ajaxStop(function() {
-    Ember.assert("An ajaxStop event which would cause the number of pending AJAX requests to be negative has been triggered. This is most likely caused by AJAX events that were started before calling `injectTestHelpers()`.", Test.pendingAjaxRequests !== 0);
+    Ember.assert("An ajaxStop event which would cause the number of pending AJAX " +
+                 "requests to be negative has been triggered. This is most likely " +
+                 "caused by AJAX events that were started before calling " +
+                 "`injectTestHelpers()`.", Test.pendingAjaxRequests !== 0);
     Test.pendingAjaxRequests--;
   });
 });
@@ -859,7 +867,7 @@ function wait(app, value) {
 *
 * Example:
 *
-* ```
+* ```javascript
 * visit('posts/index').then(function() {
 *   // assert something
 * });
@@ -877,7 +885,7 @@ asyncHelper('visit', visit);
 *
 * Example:
 *
-* ```
+* ```javascript
 * click('.some-jQuery-selector').then(function() {
 *  // assert something
 * });
@@ -894,7 +902,7 @@ asyncHelper('click', click);
 *
 * Example:
 *
-* ```
+* ```javascript
 * keyEvent('.some-jQuery-selector', 'keypress', 13).then(function() {
 *  // assert something
 * });
@@ -913,7 +921,7 @@ asyncHelper('keyEvent', keyEvent);
 *
 * Example:
 *
-* ```
+* ```javascript
 * fillIn('#email', 'you@example.com').then(function() {
 *   // assert something
 * });
@@ -933,7 +941,7 @@ asyncHelper('fillIn', fillIn);
 *
 * Example:
 *
-* ```
+* ```javascript
 * var $el = find('.my-selector);
 * ```
 *
@@ -944,12 +952,11 @@ asyncHelper('fillIn', fillIn);
 helper('find', find);
 
 /**
-*
-* Like `find`, but throws an error if the element selector returns no results
+* Like `find`, but throws an error if the element selector returns no results.
 *
 * Example:
 *
-* ```
+* ```javascript
 * var $el = findWithAssert('.doesnt-exist'); // throws error
 * ```
 *
@@ -970,7 +977,7 @@ helper('findWithAssert', findWithAssert);
 
   Example:
 
-  ```
+  ```javascript
   Ember.Test.registerAsyncHelper('loginUser', function(app, username, password) {
     visit('secured/path/here')
     .fillIn('#username', username)
@@ -983,7 +990,6 @@ helper('findWithAssert', findWithAssert);
   @method wait
   @param {Object} value The value to be returned.
   @return {RSVP.Promise}
-  ```
 */
 asyncHelper('wait', wait);
 asyncHelper('andThen', andThen);

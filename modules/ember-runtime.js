@@ -1324,7 +1324,9 @@ function makeCtor() {
 
           Ember.assert("Ember.Object.create no longer supports defining computed properties.", !(value instanceof Ember.ComputedProperty));
           Ember.assert("Ember.Object.create no longer supports defining methods that call _super.", !(typeof value === 'function' && value.toString().indexOf('._super') !== -1));
-          Ember.assert("`actions` must be provided at extend time, not at create time, when Ember.ActionHandler is used (i.e. views, controllers & routes).", !((keyName === 'actions') && Ember.ActionHandler.detect(this)));
+          Ember.assert("`actions` must be provided at extend time, not at create " +
+                       "time, when Ember.ActionHandler is used (i.e. views, " +
+                       "controllers & routes).", !((keyName === 'actions') && Ember.ActionHandler.detect(this)));
 
           if (concatenatedProperties && indexOf(concatenatedProperties, keyName) >= 0) {
             var baseValue = this[keyName];
@@ -1552,11 +1554,10 @@ CoreObject.PrototypeMixin = Mixin.create({
   willDestroy: Ember.K,
 
   /**
-    @private
-
     Invoked by the run loop to actually destroy the object. This is
     scheduled for execution by the `destroy` method.
 
+    @private
     @method _scheduledDestroy
   */
   _scheduledDestroy: function() {
@@ -2307,7 +2308,7 @@ function contentPropertyDidChange(content, contentKey) {
   @namespace Ember
   @extends Ember.Object
 */
-Ember.ObjectProxy = Ember.Object.extend(/** @scope Ember.ObjectProxy.prototype */ {
+Ember.ObjectProxy = Ember.Object.extend({
   /**
     The object whose properties will be forwarded.
 
@@ -3420,7 +3421,7 @@ var get = Ember.get, set = Ember.set, isNone = Ember.isNone, map = Ember.Enumera
   @uses Ember.Enumerable
   @since Ember 0.9.0
 */
-Ember.Array = Ember.Mixin.create(Ember.Enumerable, /** @scope Ember.Array.prototype */ {
+Ember.Array = Ember.Mixin.create(Ember.Enumerable, {
 
   /**
     Your array must support the `length` property. Your replace methods should
@@ -4682,6 +4683,11 @@ ArrayComputedProperty.prototype.resetValue = function (array) {
   return array;
 };
 
+// This is a stopgap to keep the reference counts correct with lazy CPs.
+ArrayComputedProperty.prototype.didChange = function (obj, keyName) {
+  return;
+};
+
 /**
   Creates a computed property which operates on dependent arrays and
   is updated with "one at a time" semantics. When items are added or
@@ -4837,11 +4843,33 @@ var get = Ember.get,
     SearchProxy;
 
 /**
+ A computed property that returns the sum of the value
+ in the dependent array.
+
+ @method computed.sum
+ @for Ember
+ @param {String} dependentKey
+ @return {Ember.ComputedProperty} computes the sum of all values in the dependentKey's array
+*/
+
+Ember.computed.sum = function(dependentKey){
+  return Ember.reduceComputed(dependentKey, {
+    initialValue: 0,
+
+    addedItem: function(accumulatedValue, item, changeMeta, instanceMeta){
+      return accumulatedValue + item;
+    },
+
+    removedItem: function(accumulatedValue, item, changeMeta, instanceMeta){
+      return accumulatedValue - item;
+    }
+  });
+};
+
+/**
   A computed property that calculates the maximum value in the
   dependent array. This will return `-Infinity` when the dependent
   array is empty.
-
-  Example
 
   ```javascript
   App.Person = Ember.Object.extend({
@@ -4851,9 +4879,17 @@ var get = Ember.get,
 
   var lordByron = App.Person.create({children: []});
   lordByron.get('maxChildAge'); // -Infinity
-  lordByron.get('children').pushObject({name: 'Augusta Ada Byron', age: 7});
+  lordByron.get('children').pushObject({
+    name: 'Augusta Ada Byron', age: 7
+  });
   lordByron.get('maxChildAge'); // 7
-  lordByron.get('children').pushObjects([{name: 'Allegra Byron', age: 5}, {name: 'Elizabeth Medora Leigh', age: 8}]);
+  lordByron.get('children').pushObjects([{
+    name: 'Allegra Byron',
+    age: 5
+  }, {
+    name: 'Elizabeth Medora Leigh',
+    age: 8
+  }]);
   lordByron.get('maxChildAge'); // 8
   ```
 
@@ -4883,8 +4919,6 @@ Ember.computed.max = function (dependentKey) {
   dependent array. This will return `Infinity` when the dependent
   array is empty.
 
-  Example
-
   ```javascript
   App.Person = Ember.Object.extend({
     childAges: Ember.computed.mapBy('children', 'age'),
@@ -4893,9 +4927,17 @@ Ember.computed.max = function (dependentKey) {
 
   var lordByron = App.Person.create({children: []});
   lordByron.get('minChildAge'); // Infinity
-  lordByron.get('children').pushObject({name: 'Augusta Ada Byron', age: 7});
+  lordByron.get('children').pushObject({
+    name: 'Augusta Ada Byron', age: 7
+  });
   lordByron.get('minChildAge'); // 7
-  lordByron.get('children').pushObjects([{name: 'Allegra Byron', age: 5}, {name: 'Elizabeth Medora Leigh', age: 8}]);
+  lordByron.get('children').pushObjects([{
+    name: 'Allegra Byron',
+    age: 5
+  }, {
+    name: 'Elizabeth Medora Leigh',
+    age: 8
+  }]);
   lordByron.get('minChildAge'); // 5
   ```
 
@@ -4923,13 +4965,12 @@ Ember.computed.min = function (dependentKey) {
 /**
   Returns an array mapped via the callback
 
-  The callback method you provide should have the following signature:
+  The callback method you provide should have the following signature.
+  `item` is the current item in the iteration.
 
   ```javascript
   function(item);
   ```
-
-  - `item` is the current item in the iteration.
 
   Example
 
@@ -4940,8 +4981,10 @@ Ember.computed.min = function (dependentKey) {
     })
   });
 
-  var hamster = App.Hamster.create({chores: ['cook', 'clean', 'write more unit tests']});
-  hamster.get('excitingChores'); // ['COOK!', 'CLEAN!', 'WRITE MORE UNIT TESTS!']
+  var hamster = App.Hamster.create({
+    chores: ['clean', 'write more unit tests']
+  });
+  hamster.get('excitingChores'); // ['CLEAN!', 'WRITE MORE UNIT TESTS!']
   ```
 
   @method computed.map
@@ -4969,8 +5012,6 @@ Ember.computed.map = function(dependentKey, callback) {
 /**
   Returns an array mapped to the specified key.
 
-  Example
-
   ```javascript
   App.Person = Ember.Object.extend({
     childAges: Ember.computed.mapBy('children', 'age')
@@ -4980,7 +5021,13 @@ Ember.computed.map = function(dependentKey, callback) {
   lordByron.get('childAges'); // []
   lordByron.get('children').pushObject({name: 'Augusta Ada Byron', age: 7});
   lordByron.get('childAges'); // [7]
-  lordByron.get('children').pushObjects([{name: 'Allegra Byron', age: 5}, {name: 'Elizabeth Medora Leigh', age: 8}]);
+  lordByron.get('children').pushObjects([{
+    name: 'Allegra Byron',
+    age: 5
+  }, {
+    name: 'Elizabeth Medora Leigh',
+    age: 8
+  }]);
   lordByron.get('childAges'); // [7, 5, 8]
   ```
 
@@ -5007,15 +5054,12 @@ Ember.computed.mapProperty = Ember.computed.mapBy;
 /**
   Filters the array by the callback.
 
-  The callback method you provide should have the following signature:
+  The callback method you provide should have the following signature.
+  `item` is the current item in the iteration.
 
   ```javascript
   function(item);
   ```
-
-  - `item` is the current item in the iteration.
-
-  Example
 
   ```javascript
   App.Hamster = Ember.Object.extend({
@@ -5071,8 +5115,6 @@ Ember.computed.filter = function(dependentKey, callback) {
 
 /**
   Filters the array by the property and value
-
-  Example
 
   ```javascript
   App.Hamster = Ember.Object.extend({
@@ -5190,7 +5232,7 @@ Ember.computed.union = Ember.computed.uniq;
 
 /**
   A computed property which returns a new array with all the duplicated
-  elements from two or more dependeny arrays.
+  elements from two or more dependent arrays.
 
   Example
 
@@ -5806,7 +5848,7 @@ if (Ember.EXTEND_PROTOTYPES === true || Ember.EXTEND_PROTOTYPES.Function) {
   @namespace Ember
   @since Ember 0.9
 */
-Ember.Comparable = Ember.Mixin.create( /** @scope Ember.Comparable.prototype */{
+Ember.Comparable = Ember.Mixin.create({
 
   /**
     Override to return the result of the comparison of the two parameters. The
@@ -5857,7 +5899,7 @@ var get = Ember.get, set = Ember.set;
   @namespace Ember
   @since Ember 0.9
 */
-Ember.Copyable = Ember.Mixin.create(/** @scope Ember.Copyable.prototype */ {
+Ember.Copyable = Ember.Mixin.create({
 
   /**
     Override to return a copy of the receiver. Default implementation raises
@@ -5961,7 +6003,7 @@ var get = Ember.get, set = Ember.set;
   @namespace Ember
   @since Ember 0.9
 */
-Ember.Freezable = Ember.Mixin.create(/** @scope Ember.Freezable.prototype */ {
+Ember.Freezable = Ember.Mixin.create({
 
   /**
     Set to `true` when the object is frozen. Use this property to detect
@@ -6140,7 +6182,7 @@ var get = Ember.get, set = Ember.set;
   @uses Ember.Array
   @uses Ember.MutableEnumerable
 */
-Ember.MutableArray = Ember.Mixin.create(Ember.Array, Ember.MutableEnumerable,/** @scope Ember.MutableArray.prototype */ {
+Ember.MutableArray = Ember.Mixin.create(Ember.Array, Ember.MutableEnumerable, {
 
   /**
     __Required.__ You must implement this method to apply this mixin.
@@ -6740,7 +6782,7 @@ Ember.DeferredMixin = Ember.Mixin.create({
     @param {Function} resolve a callback function to be called when done
     @param {Function} reject  a callback function to be called when failed
   */
-  then: function(resolve, reject) {
+  then: function(resolve, reject, label) {
     var deferred, promise, entity;
 
     entity = this;
@@ -6755,7 +6797,7 @@ Ember.DeferredMixin = Ember.Mixin.create({
       }
     }
 
-    return promise.then(resolve && fulfillmentHandler, reject);
+    return promise.then(resolve && fulfillmentHandler, reject, label);
   },
 
   /**
@@ -6786,7 +6828,7 @@ Ember.DeferredMixin = Ember.Mixin.create({
   },
 
   _deferred: Ember.computed(function() {
-    return RSVP.defer();
+    return RSVP.defer('Ember: DeferredMixin - ' + this);
   })
 });
 
@@ -6818,12 +6860,222 @@ Ember.ActionHandler = Ember.Mixin.create({
   mergedProperties: ['_actions'],
 
   /**
-    @private
+    The collection of functions, keyed by name, available on this route as
+    action targets.
 
+    These functions will be invoked when a matching `{{action}}` is triggered
+    from within a template and the application's current route is this route.
+
+    Actions can also be invoked from other parts of your application via `Route#send`
+    or `Controller#send`.
+
+    The `actions` hash will inherit action handlers from
+    the `actions` hash defined on extended Route parent classes
+    or mixins rather than just replace the entire hash, e.g.:
+
+    ```js
+    App.CanDisplayBanner = Ember.Mixin.create({
+      actions: {
+        displayBanner: function(msg) {
+          // ...
+        }
+      }
+    });
+
+    App.WelcomeRoute = Ember.Route.extend(App.CanDisplayBanner, {
+      actions: {
+        playMusic: function() {
+          // ...
+        }
+      }
+    });
+
+    // `WelcomeRoute`, when active, will be able to respond
+    // to both actions, since the actions hash is merged rather
+    // then replaced when extending mixins / parent classes.
+    this.send('displayBanner');
+    this.send('playMusic');
+    ```
+
+    Within a route's action handler, the value of the `this` context
+    is the Route object:
+
+    ```js
+    App.SongRoute = Ember.Route.extend({
+      actions: {
+        myAction: function() {
+          this.controllerFor("song");
+          this.transitionTo("other.route");
+          ...
+        }
+      }
+    });
+    ```
+
+    It is also possible to call `this._super()` from within an
+    action handler if it overrides a handler defined on a parent
+    class or mixin:
+
+    Take for example the following routes:
+
+    ```js
+    App.DebugRoute = Ember.Mixin.create({
+      actions: {
+        debugRouteInformation: function() {
+          console.debug("trololo");
+        }
+      }
+    });
+
+    App.AnnoyingDebugRoute = Ember.Route.extend(App.DebugRoute, {
+      actions: {
+        debugRouteInformation: function() {
+          // also call the debugRouteInformation of mixed in App.DebugRoute
+          this._super();
+
+          // show additional annoyance
+          window.alert(...);
+        }
+      }
+    });
+    ```
+
+    ## Bubbling
+
+    By default, an action will stop bubbling once a handler defined
+    on the `actions` hash handles it. To continue bubbling the action,
+    you must return `true` from the handler:
+
+    ```js
+    App.Router.map(function() {
+      this.resource("album", function() {
+        this.route("song");
+      });
+    });
+
+    App.AlbumRoute = Ember.Route.extend({
+      actions: {
+        startPlaying: function() {
+        }
+      }
+    });
+
+    App.AlbumSongRoute = Ember.Route.extend({
+      actions: {
+        startPlaying: function() {
+          // ...
+
+          if (actionShouldAlsoBeTriggeredOnParentRoute) {
+            return true;
+          }
+        }
+      }
+    });
+    ```
+
+    ## Built-in actions
+
+    There are a few built-in actions pertaining to transitions that you
+    can use to customize transition behavior: `willTransition` and
+    `error`.
+
+    ### `willTransition`
+
+    The `willTransition` action is fired at the beginning of any
+    attempted transition with a `Transition` object as the sole
+    argument. This action can be used for aborting, redirecting,
+    or decorating the transition from the currently active routes.
+
+    A good example is preventing navigation when a form is
+    half-filled out:
+
+    ```js
+    App.ContactFormRoute = Ember.Route.extend({
+      actions: {
+        willTransition: function(transition) {
+          if (this.controller.get('userHasEnteredData')) {
+            this.controller.displayNavigationConfirm();
+            transition.abort();
+          }
+        }
+      }
+    });
+    ```
+
+    You can also redirect elsewhere by calling
+    `this.transitionTo('elsewhere')` from within `willTransition`.
+    Note that `willTransition` will not be fired for the
+    redirecting `transitionTo`, since `willTransition` doesn't
+    fire when there is already a transition underway. If you want
+    subsequent `willTransition` actions to fire for the redirecting
+    transition, you must first explicitly call
+    `transition.abort()`.
+
+    ### `error`
+
+    When attempting to transition into a route, any of the hooks
+    may return a promise that rejects, at which point an `error`
+    action will be fired on the partially-entered routes, allowing
+    for per-route error handling logic, or shared error handling
+    logic defined on a parent route.
+
+    Here is an example of an error handler that will be invoked
+    for rejected promises from the various hooks on the route,
+    as well as any unhandled errors from child routes:
+
+    ```js
+    App.AdminRoute = Ember.Route.extend({
+      beforeModel: function() {
+        return Ember.RSVP.reject("bad things!");
+      },
+
+      actions: {
+        error: function(error, transition) {
+          // Assuming we got here due to the error in `beforeModel`,
+          // we can expect that error === "bad things!",
+          // but a promise model rejecting would also
+          // call this hook, as would any errors encountered
+          // in `afterModel`.
+
+          // The `error` hook is also provided the failed
+          // `transition`, which can be stored and later
+          // `.retry()`d if desired.
+
+          this.transitionTo('login');
+        }
+      }
+    });
+    ```
+
+    `error` actions that bubble up all the way to `ApplicationRoute`
+    will fire a default error handler that logs the error. You can
+    specify your own global default error handler by overriding the
+    `error` handler on `ApplicationRoute`:
+
+    ```js
+    App.ApplicationRoute = Ember.Route.extend({
+      actions: {
+        error: function(error, transition) {
+          this.controllerFor('banner').displayError(error.message);
+        }
+      }
+    });
+    ```
+
+    @see {Ember.Route#send}
+    @see {Handlebars.helpers.action}
+
+    @property actions
+    @type Hash
+    @default null
+  */
+
+  /**
     Moves `actions` to `_actions` at extend time. Note that this currently
     modifies the mixin themselves, which is technically dubious but
     is practically of little consequence. This may change in the future.
 
+    @private
     @method willMergeMixin
   */
   willMergeMixin: function(props) {
@@ -6895,7 +7147,7 @@ function tap(proxy, promise) {
     set(proxy, 'isRejected', true);
     set(proxy, 'reason', reason);
     throw reason;
-  });
+  }, "Ember: PromiseProxy");
 }
 
 /**
@@ -6950,7 +7202,7 @@ function tap(proxy, promise) {
   controller.get('lastName')  //=> 'Penner'
   ```
 
-  If the controller is backing a template, the attributes are 
+  If the controller is backing a template, the attributes are
   bindable from within that template
 
   ```handlebars
@@ -6964,12 +7216,63 @@ function tap(proxy, promise) {
   @class Ember.PromiseProxyMixin
 */
 Ember.PromiseProxyMixin = Ember.Mixin.create({
+  /**
+    If the proxied promise is rejected this will contain the reason
+    provided.
+
+    @property reason
+    @default null
+  */
   reason:    null,
+
+  /**
+    Once the proxied promise has settled this will become `false`.
+
+    @property isPending
+    @default true
+  */
   isPending:  not('isSettled').readOnly(),
+
+  /**
+    Once the proxied promise has settled this will become `true`.
+
+    @property isSettled
+    @default false
+  */
   isSettled:  or('isRejected', 'isFulfilled').readOnly(),
+
+  /**
+    Will become `true` if the proxied promise is rejected.
+
+    @property isRejected
+    @default false
+  */
   isRejected:  false,
+
+  /**
+    Will become `true` if the proxied promise is fulfilled.
+
+    @property isFullfilled
+    @default false
+  */
   isFulfilled: false,
 
+  /**
+    The promise whose fulfillment value is being proxied by this object.
+
+    This property must be specified upon creation, and should not be
+    changed once created.
+
+    Example:
+
+    ```javascript
+    Ember.ObjectController.extend(Ember.PromiseProxyMixin).create({
+      promise: <thenable>
+    });
+    ```
+
+    @property promise
+  */
   promise: Ember.computed(function(key, promise) {
     if (arguments.length === 2) {
       return tap(this, promise);
@@ -6978,12 +7281,47 @@ Ember.PromiseProxyMixin = Ember.Mixin.create({
     }
   }),
 
-  then: function(fulfill, reject) {
-    return get(this, 'promise').then(fulfill, reject);
-  }
+  /**
+    An alias to the proxied promise's `then`.
+
+    See RSVP.Promise.then.
+
+    @method then
+    @param {Function} callback
+    @return {RSVP.Promise}
+  */
+  then: promiseAlias('then'),
+
+  /**
+    An alias to the proxied promise's `catch`.
+
+    See RSVP.Promise.catch.
+
+    @method catch
+    @param {Function} callback
+    @return {RSVP.Promise}
+  */
+  'catch': promiseAlias('catch'),
+
+  /**
+    An alias to the proxied promise's `finally`.
+
+    See RSVP.Promise.finally.
+
+    @method finally
+    @param {Function} callback
+    @return {RSVP.Promise}
+  */
+  'finally': promiseAlias('finally')
+
 });
 
-
+function promiseAlias(name) {
+  return function () {
+    var promise = get(this, 'promise');
+    return promise[name].apply(promise, arguments);
+  };
+}
 
 })();
 
@@ -7106,11 +7444,12 @@ Ember.TrackedArray.prototype = {
     items in the array.
 
     `callback` will be called for each operation and will be passed the following arguments:
-      * {array} items The items for the given operation
-      * {number} offset The computed offset of the items, ie the index in the
-      array of the first item for this operation.
-      * {string} operation The type of the operation.  One of
-      `Ember.TrackedArray.{RETAIN, DELETE, INSERT}`
+
+    * {array} items The items for the given operation
+    * {number} offset The computed offset of the items, ie the index in the
+    array of the first item for this operation.
+    * {string} operation The type of the operation.  One of
+    `Ember.TrackedArray.{RETAIN, DELETE, INSERT}`
 
     @method apply
     @param {function} callback
@@ -7132,7 +7471,7 @@ Ember.TrackedArray.prototype = {
   },
 
   /**
-    Return an ArrayOperationMatch for the operation that contains the item at `index`.
+    Return an `ArrayOperationMatch` for the operation that contains the item at `index`.
 
     @method _findArrayOperation
 
@@ -7294,10 +7633,10 @@ Ember.TrackedArray.prototype = {
 
   @method ArrayOperation
   @private
-  @property {string} type The type of the operation.  One of
+  @param {string} type The type of the operation.  One of
   `Ember.TrackedArray.{RETAIN, INSERT, DELETE}`
-  @property {number} count The number of items in this operation.
-  @property {array} items The items of the operation, if included.  RETAIN and
+  @param {number} count The number of items in this operation.
+  @param {array} items The items of the operation, if included.  RETAIN and
   INSERT include their items, DELETE does not.
 */
 function ArrayOperation (operation, count, items) {
@@ -7312,11 +7651,11 @@ function ArrayOperation (operation, count, items) {
 
   @method ArrayOperationMatch
   @private
-  @property {ArrayOperation} operation
-  @property {number} index The index of `operation` in the array of operations.
-  @property {boolean} split Whether or not the item index searched for would
+  @param {ArrayOperation} operation
+  @param {number} index The index of `operation` in the array of operations.
+  @param {boolean} split Whether or not the item index searched for would
   require a split for a new operation type.
-  @property {number} rangeStart The index of the first item in the operation,
+  @param {number} rangeStart The index of the first item in the operation,
   with respect to the tracked array.  The index of the last item can be computed
   from `rangeStart` and `operation.count`.
 */
@@ -7577,7 +7916,7 @@ var get = Ember.get, set = Ember.set;
   @extends Ember.Object
   @uses Ember.MutableArray
 */
-Ember.ArrayProxy = Ember.Object.extend(Ember.MutableArray,/** @scope Ember.ArrayProxy.prototype */ {
+Ember.ArrayProxy = Ember.Object.extend(Ember.MutableArray, {
 
   /**
     The content array. Must be an object that implements `Ember.Array` and/or
@@ -7631,11 +7970,10 @@ Ember.ArrayProxy = Ember.Object.extend(Ember.MutableArray,/** @scope Ember.Array
   },
 
   /**
-    @private
-
     Invoked when the content property is about to change. Notifies observers that the
     entire array content will change.
 
+    @private
     @method _contentWillChange
   */
   _contentWillChange: Ember.beforeObserver('content', function() {
@@ -7657,11 +7995,10 @@ Ember.ArrayProxy = Ember.Object.extend(Ember.MutableArray,/** @scope Ember.Array
   contentArrayDidChange: Ember.K,
 
   /**
-    @private
-
     Invoked when the content property changes. Notifies observers that the
     entire array content has changed.
 
+    @private
     @method _contentDidChange
   */
   _contentDidChange: Ember.observer('content', function() {
@@ -8360,7 +8697,7 @@ var get = Ember.get, set = Ember.set, guidFor = Ember.guidFor, isNone = Ember.is
   @since Ember 0.9
 */
 Ember.Set = Ember.CoreObject.extend(Ember.MutableEnumerable, Ember.Copyable, Ember.Freezable,
-  /** @scope Ember.Set.prototype */ {
+  {
 
   // ..........................................................
   // IMPLEMENT ENUMERABLE APIS
@@ -8749,7 +9086,6 @@ var loaded = {};
   The provided `callback` will be called with the `name` passed
   resolved from a string into the object:
 
-
   ``` javascript
   Ember.onLoad('Ember.Handlebars' function(hbars){
     hbars.registerHelper(...);
@@ -8816,6 +9152,7 @@ var get = Ember.get;
 
   @class ControllerMixin
   @namespace Ember
+  @uses Ember.ActionHandler
 */
 Ember.ControllerMixin = Ember.Mixin.create(Ember.ActionHandler, {
   /* ducktype as a controller */

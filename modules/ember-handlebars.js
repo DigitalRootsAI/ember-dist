@@ -3,11 +3,10 @@ var slice = Array.prototype.slice,
     originalTemplate = Ember.Handlebars.template;
 
 /**
-  @private
-
   If a path starts with a reserved keyword, returns the root
   that should be used.
 
+  @private
   @method normalizePath
   @for Ember
   @param root {Object}
@@ -125,8 +124,6 @@ Ember.Handlebars.resolveHash = function(context, hash, options) {
 };
 
 /**
-  @private
-
   Registers a helper in Handlebars that will be called if no property with the
   given name can be found on the current context object, and no helper with
   that name is registered.
@@ -134,6 +131,7 @@ Ember.Handlebars.resolveHash = function(context, hash, options) {
   This throws an exception with a more helpful error message so the user can
   track down where the problem is happening.
 
+  @private
   @method helperMissing
   @for Ember.Handlebars.helpers
   @param {String} path
@@ -158,8 +156,6 @@ Ember.Handlebars.registerHelper('helperMissing', function(path) {
 });
 
 /**
-  @private
-
   Registers a helper in Handlebars that will be called if no property with the
   given name can be found on the current context object, and no helper with
   that name is registered.
@@ -167,6 +163,7 @@ Ember.Handlebars.registerHelper('helperMissing', function(path) {
   This throws an exception with a more helpful error message so the user can
   track down where the problem is happening.
 
+  @private
   @method helperMissing
   @for Ember.Handlebars.helpers
   @param {String} path
@@ -176,7 +173,11 @@ Ember.Handlebars.registerHelper('blockHelperMissing', function(path) {
 
   var options = arguments[arguments.length - 1];
 
-  Ember.assert("`blockHelperMissing` was invoked without a helper name, which is most likely due to a mismatch between the version of Ember.js you're running now and the one used to precompile your templates. Please make sure the version of `ember-handlebars-compiler` you're using is up to date.", path);
+  Ember.assert("`blockHelperMissing` was invoked without a helper name, which " +
+               "is most likely due to a mismatch between the version of " +
+               "Ember.js you're running now and the one used to precompile your " +
+               "templates. Please make sure the version of " +
+               "`ember-handlebars-compiler` you're using is up to date.", path);
 
   var helper = Ember.Handlebars.resolveHelper(options.data.view.container, path);
 
@@ -305,8 +306,6 @@ Ember.Handlebars.registerBoundHelper = function(name, fn) {
 };
 
 /**
-  @private
-
   A (mostly) private helper function to `registerBoundHelper`. Takes the
   provided Handlebars helper function fn and returns it in wrapped
   bound helper form.
@@ -325,6 +324,7 @@ Ember.Handlebars.registerBoundHelper = function(name, fn) {
   In the above example, if the helper function hadn't been wrapped in
   `makeBoundHelper`, the registered helper would be unbound.
 
+  @private
   @method makeBoundHelper
   @for Ember.Handlebars
   @param {Function} function
@@ -338,8 +338,8 @@ Ember.Handlebars.makeBoundHelper = function(fn) {
       numProperties = properties.length,
       options = arguments[arguments.length - 1],
       normalizedProperties = [],
-      types = options.types,
       data = options.data,
+      types = data.isUnbound ? slice.call(options.types, 1) : options.types,
       hash = options.hash,
       view = data.view,
       contexts = options.contexts,
@@ -370,7 +370,11 @@ Ember.Handlebars.makeBoundHelper = function(fn) {
         normalizedProperties.push(normalizedProp);
         watchedProperties.push(normalizedProp);
       } else {
-        normalizedProperties.push(null);
+        if(data.isUnbound) {
+          normalizedProperties.push({path: properties[loc]});
+        }else {
+          normalizedProperties.push(null);
+        }
       }
     }
 
@@ -448,10 +452,9 @@ Ember.Handlebars.makeBoundHelper = function(fn) {
 };
 
 /**
-  @private
-
   Renders the unbound form of an otherwise bound helper function.
 
+  @private
   @method evaluateUnboundHelper
   @param {Function} fn
   @param {Object} context
@@ -459,7 +462,15 @@ Ember.Handlebars.makeBoundHelper = function(fn) {
   @param {String} options
 */
 function evaluateUnboundHelper(context, fn, normalizedProperties, options) {
-  var args = [], hash = options.hash, boundOptions = hash.boundOptions, loc, len, property, boundOption;
+  var args = [],
+   hash = options.hash,
+   boundOptions = hash.boundOptions,
+   types = slice.call(options.types, 1),
+   loc,
+   len,
+   property,
+   propertyType,
+   boundOption;
 
   for (boundOption in boundOptions) {
     if (!boundOptions.hasOwnProperty(boundOption)) { continue; }
@@ -468,18 +479,22 @@ function evaluateUnboundHelper(context, fn, normalizedProperties, options) {
 
   for(loc = 0, len = normalizedProperties.length; loc < len; ++loc) {
     property = normalizedProperties[loc];
-    args.push(Ember.Handlebars.get(property.root, property.path, options));
+    propertyType = types[loc];
+    if(propertyType === "ID") {
+      args.push(Ember.Handlebars.get(property.root, property.path, options));
+    } else {
+      args.push(property.path);
+    }
   }
   args.push(options);
   return fn.apply(context, args);
 }
 
 /**
-  @private
-
   Overrides Handlebars.template so that we can distinguish
   user-created, top-level templates from inner contexts.
 
+  @private
   @method template
   @for Ember.Handlebars
   @param {String} spec
@@ -599,7 +614,7 @@ var DOMManager = {
 
     view.transitionTo('preRender');
 
-    Ember.run.schedule('render', this, function() {
+    Ember.run.schedule('render', this, function renderMetamorphView() {
       if (view.isDestroying) { return; }
 
       view.clearRenderedChildren();
@@ -1193,8 +1208,6 @@ function shouldDisplayIfHelperContent(result) {
 }
 
 /**
-  @private
-
   '_triageMustache' is used internally select between a binding, helper, or component for
   the given context. Until this point, it would be hard to determine if the
   mustache is a property reference or a regular helper reference. This triage
@@ -1202,6 +1215,7 @@ function shouldDisplayIfHelperContent(result) {
 
   This would not be typically invoked by directly.
 
+  @private
   @method _triageMustache
   @for Ember.Handlebars.helpers
   @param {String} property Property/helperID to triage
@@ -1244,8 +1258,6 @@ Ember.Handlebars.resolveHelper = function(container, name) {
 };
 
 /**
-  @private
-
   `bind` can be used to display a value, then update that value if it
   changes. For example, if you wanted to print the `title` property of
   `content`:
@@ -1261,6 +1273,7 @@ Ember.Handlebars.resolveHelper = function(container, name) {
   relies on Ember's KVO system. For all other browsers this will be handled for
   you automatically.
 
+  @private
   @method bind
   @for Ember.Handlebars.helpers
   @param {String} property Property to bind
@@ -1280,8 +1293,6 @@ EmberHandlebars.registerHelper('bind', function bindHelper(property, options) {
 });
 
 /**
-  @private
-
   Use the `boundIf` helper to create a conditional that re-evaluates
   whenever the truthiness of the bound value changes.
 
@@ -1291,6 +1302,7 @@ EmberHandlebars.registerHelper('bind', function bindHelper(property, options) {
   {{/boundIf}}
   ```
 
+  @private
   @method boundIf
   @for Ember.Handlebars.helpers
   @param {String} property Property to bind
@@ -1598,7 +1610,9 @@ EmberHandlebars.registerHelper('bind-attr', function bindAttrHelper(options) {
     observer = function observer() {
       var result = handlebarsGet(ctx, path, options);
 
-      Ember.assert(fmt("Attributes must be numbers, strings or booleans, not %@", [result]), result === null || result === undefined || typeof result === 'number' || typeof result === 'string' || typeof result === 'boolean');
+      Ember.assert(fmt("Attributes must be numbers, strings or booleans, not %@", [result]),
+                   result === null || result === undefined || typeof result === 'number' ||
+                     typeof result === 'string' || typeof result === 'boolean');
 
       var elem = view.$("[data-bindattr-" + dataId + "='" + dataId + "']");
 
@@ -1654,8 +1668,6 @@ EmberHandlebars.registerHelper('bindAttr', function bindAttrHelper() {
 });
 
 /**
-  @private
-
   Helper that, given a space-separated string of property paths and a context,
   returns an array of class names. Calling this method also has the side
   effect of setting up observers at those property paths, such that if they
@@ -1667,6 +1679,7 @@ EmberHandlebars.registerHelper('bindAttr', function bindAttrHelper() {
   "fooBar"). If the value is a string, it will add that string as the class.
   Otherwise, it will not add any new class name.
 
+  @private
   @method bindClasses
   @for Ember.Handlebars
   @param {Ember.Object} context The context from which to lookup properties
@@ -2312,10 +2325,17 @@ Ember.Handlebars.registerHelper('collection', function collectionHelper(path, op
 
   if (hash.itemView) {
     var controller = data.keywords.controller;
-    Ember.assert('You specified an itemView, but the current context has no container to look the itemView up in. This probably means that you created a view manually, instead of through the container. Instead, use container.lookup("view:viewName"), which will properly instantiate your view.', controller && controller.container);
+    Ember.assert('You specified an itemView, but the current context has no ' +
+                 'container to look the itemView up in. This probably means ' +
+                 'that you created a view manually, instead of through the ' +
+                 'container. Instead, use container.lookup("view:viewName"), ' +
+                 'which will properly instantiate your view.',
+                 controller && controller.container);
     var container = controller.container;
     itemViewClass = container.resolve('view:' + hash.itemView);
-    Ember.assert('You specified the itemView ' + hash.itemView + ", but it was not found at " + container.describe("view:" + hash.itemView) + " (and it was not registered in the container)", !!itemViewClass);
+    Ember.assert('You specified the itemView ' + hash.itemView + ", but it was " +
+                 "not found at " + container.describe("view:" + hash.itemView) +
+                 " (and it was not registered in the container)", !!itemViewClass);
   } else if (hash.itemViewClass) {
     itemViewClass = handlebarsGet(collectionPrototype, hash.itemViewClass, options);
   } else {
@@ -2410,7 +2430,7 @@ Ember.Handlebars.registerHelper('unbound', function unboundHelper(property, fn) 
   if (arguments.length > 2) {
     // Unbound helper call.
     options.data.isUnbound = true;
-    helper = Ember.Handlebars.helpers[arguments[0]] || Ember.Handlebars.helperMissing;
+    helper = Ember.Handlebars.helpers[arguments[0]] || Ember.Handlebars.helpers.helperMissing;
     out = helper.apply(this, Array.prototype.slice.call(arguments, 1));
     delete options.data.isUnbound;
     return out;
@@ -2543,7 +2563,12 @@ Ember.Handlebars.EachView = Ember.CollectionView.extend(Ember._Metamorph, {
   },
 
   _assertArrayLike: function(content) {
-    Ember.assert(fmt("The value that #each loops over must be an Array. You passed %@, but it should have been an ArrayController", [content.constructor]), !Ember.ControllerMixin.detect(content) || (content && content.isGenerated) || content instanceof Ember.ArrayController);
+    Ember.assert(fmt("The value that #each loops over must be an Array. You " +
+                     "passed %@, but it should have been an ArrayController",
+                     [content.constructor]),
+                     !Ember.ControllerMixin.detect(content) ||
+                       (content && content.isGenerated) ||
+                       content instanceof Ember.ArrayController);
     Ember.assert(fmt("The value that #each loops over must be an Array. You passed %@", [(Ember.ControllerMixin.detect(content) && content.get('model') !== undefined) ? fmt("'%@' (wrapped in %@)", [content.get('model'), content]) : content]), Ember.Array.detect(content));
   },
 
@@ -3486,7 +3511,7 @@ var get = Ember.get, set = Ember.set;
   The internal class used to create text inputs when the `{{input}}`
   helper is used with `type` of `text`.
 
-  See [handlebars.helpers.input](/api/classes/Ember.Handlebars.helpers.html#method_input)  for usage details.
+  See [Handlebars.helpers.input](/api/classes/Ember.Handlebars.helpers.html#method_input)  for usage details.
 
   ## Layout and LayoutName properties
 
@@ -3499,8 +3524,7 @@ var get = Ember.get, set = Ember.set;
   @extends Ember.Component
   @uses Ember.TextSupport
 */
-Ember.TextField = Ember.Component.extend(Ember.TextSupport,
-  /** @scope Ember.TextField.prototype */ {
+Ember.TextField = Ember.Component.extend(Ember.TextSupport, {
 
   classNames: ['ember-text-field'],
   tagName: "input",
@@ -3945,9 +3969,7 @@ Ember.SelectOptgroup = Ember.CollectionView.extend({
   @namespace Ember
   @extends Ember.View
 */
-Ember.Select = Ember.View.extend(
-  /** @scope Ember.Select.prototype */ {
-
+Ember.Select = Ember.View.extend({
   tagName: 'select',
   classNames: ['ember-select'],
   defaultTemplate: precompileTemplate('{{#if view.prompt}}<option value="">{{view.prompt}}</option>{{/if}}{{#if view.optionGroupPath}}{{#each view.groupedContent}}{{view view.groupView content=content label=label}}{{/each}}{{else}}{{#each view.content}}{{view view.optionView content=this}}{{/each}}{{/if}}'),
@@ -4593,8 +4615,6 @@ Ember.ComponentLookup = Ember.Object.extend({
 */
 
 /**
-  @private
-
   Find templates stored in the head tag as script tags and make them available
   to `Ember.CoreView` in the global `Ember.TEMPLATES` object. This will be run
   as as jQuery DOM-ready callback.
@@ -4604,6 +4624,7 @@ Ember.ComponentLookup = Ember.Object.extend({
   Those with type `text/x-raw-handlebars` will be compiled with regular
   Handlebars and are suitable for use in views' computed properties.
 
+  @private
   @method bootstrap
   @for Ember.Handlebars
   @static

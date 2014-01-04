@@ -2,15 +2,14 @@
 var Ember = { assert: function() {}, FEATURES: { isEnabled: function() {} } };
 /*!
  * @overview  Ember - JavaScript Application Framework
- * @copyright Copyright 2011-2013 Tilde Inc. and contributors
+ * @copyright Copyright 2011-2014 Tilde Inc. and contributors
  *            Portions Copyright 2006-2011 Strobe Inc.
  *            Portions Copyright 2008-2011 Apple Inc. All rights reserved.
  * @license   Licensed under MIT license
  *            See https://raw.github.com/emberjs/ember.js/master/LICENSE
+ * @version   1.4.0-beta.1+canary.ed89e1ea
  */
 
-
- // Version: 1.4.0-beta.1+canary.9d11fb00
 
 (function() {
 /*global __fail__*/
@@ -34,7 +33,20 @@ if ('undefined' === typeof Ember) {
   }
 }
 
-Ember.ENV = 'undefined' === typeof ENV ? {} : ENV;
+// This needs to be kept in sync with the logic in
+// `packages/ember-metal/lib/core.js`.
+//
+// This is duplicated here to ensure that `Ember.ENV`
+// is setup even if `Ember` is not loaded yet.
+if (Ember.ENV) {
+  // do nothing if Ember.ENV is already setup
+} else if ('undefined' !== typeof EmberENV) {
+  Ember.ENV = EmberENV;
+} else if('undefined' !== typeof ENV) {
+  Ember.ENV = ENV;
+} else {
+  Ember.ENV = {};
+}
 
 if (!('MANDATORY_SETTER' in Ember.ENV)) {
   Ember.ENV.MANDATORY_SETTER = true; // default to true for debug dist

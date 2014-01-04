@@ -202,7 +202,10 @@ Ember.DefaultResolver = Ember.Object.extend({
         type = split[0],
         name = split[1];
 
-    Ember.assert("Tried to normalize a container name without a colon (:) in it. You probably tried to lookup a name that did not contain a type, a colon, and a name. A proper lookup name would be `view:post`.", split.length === 2);
+    Ember.assert("Tried to normalize a container name without a colon (:) in " +
+                 "it. You probably tried to lookup a name that did not contain " +
+                 "a type, a colon, and a name. A proper lookup name would be " +
+                 "`view:post`.", split.length === 2);
 
     if (type !== 'template') {
       var result = name;
@@ -672,13 +675,12 @@ var Application = Ember.Application = Ember.Namespace.extend(Ember.DeferredMixin
   },
 
   /**
-    @private
-
     Build the container for the current application.
 
     Also register a default application view in case the application
     itself does not.
 
+    @private
     @method buildContainer
     @return {Ember.Container} the configured container
   */
@@ -689,8 +691,6 @@ var Application = Ember.Application = Ember.Namespace.extend(Ember.DeferredMixin
   },
 
   /**
-    @private
-
     If the application has not opted out of routing and has not explicitly
     defined a router, supply a default router for the application author
     to configure.
@@ -705,6 +705,7 @@ var Application = Ember.Application = Ember.Namespace.extend(Ember.DeferredMixin
     });
     ```
 
+    @private
     @method defaultRouter
     @return {Ember.Router} the default router
   */
@@ -722,8 +723,6 @@ var Application = Ember.Application = Ember.Namespace.extend(Ember.DeferredMixin
   },
 
   /**
-    @private
-
     Automatically initialize the application once the DOM has
     become ready.
 
@@ -736,6 +735,7 @@ var Application = Ember.Application = Ember.Namespace.extend(Ember.DeferredMixin
     `advanceReadiness()` once all of your code has finished
     loading.
 
+    @private
     @method scheduleInitialize
   */
   scheduleInitialize: function() {
@@ -852,28 +852,26 @@ var Application = Ember.Application = Ember.Namespace.extend(Ember.DeferredMixin
   },
 
   /**
-    @private
-    @deprecated
-
     Calling initialize manually is not supported.
 
     Please see Ember.Application#advanceReadiness and
     Ember.Application#deferReadiness.
 
+    @private
+    @deprecated
     @method initialize
    **/
   initialize: function() {
     Ember.deprecate('Calling initialize manually is not supported. Please see Ember.Application#advanceReadiness and Ember.Application#deferReadiness');
   },
   /**
-    @private
-
     Initialize the application. This happens automatically.
 
     Run any initializers and run the application load hook. These hooks may
     choose to defer readiness. For example, an authentication hook might want
     to defer readiness until the auth token has been retrieved.
 
+    @private
     @method _initialize
   */
   _initialize: function() {
@@ -1027,12 +1025,11 @@ var Application = Ember.Application = Ember.Namespace.extend(Ember.DeferredMixin
   },
 
   /**
-    @private
-
     Setup up the event dispatcher to receive events on the
     application's `rootElement` with any registered
     `customEvents`.
 
+    @private
     @method setupEventDispatcher
   */
   setupEventDispatcher: function() {
@@ -1045,11 +1042,10 @@ var Application = Ember.Application = Ember.Namespace.extend(Ember.DeferredMixin
   },
 
   /**
-    @private
-
     trigger a new call to `route` whenever the URL changes.
     If the application has a router, use it to route to the current URL, and
 
+    @private
     @method startRouting
     @property router {Ember.Router}
   */
@@ -1122,8 +1118,6 @@ Ember.Application.reopenClass({
   },
 
   /**
-    @private
-
     This creates a container with the default Ember naming conventions.
 
     It also configures the container:
@@ -1141,6 +1135,7 @@ Ember.Application.reopenClass({
     * the application view receives the application template as its
       `defaultTemplate` property
 
+    @private
     @method buildContainer
     @static
     @param {Ember.Application} namespace the application to build the
@@ -1188,8 +1183,6 @@ Ember.Application.reopenClass({
 });
 
 /**
-  @private
-
   This function defines the default lookup rules for container lookups:
 
   * templates are looked up on `Ember.TEMPLATES`
@@ -1200,6 +1193,7 @@ Ember.Application.reopenClass({
   This allows the application to register default injections in the container
   that could be overridden by the normal naming convention.
 
+  @private
   @method resolverFor
   @param {Ember.Namespace} namespace the namespace to look for classes
   @return {*} the resolved value for a given lookup
@@ -1259,7 +1253,7 @@ Ember.runLoadHooks('Ember.Application', Ember.Application);
 var get = Ember.get, set = Ember.set;
 
 function verifyNeedsDependencies(controller, container, needs) {
-  var dependency, i, l;
+  var dependency, i, l, missing = [];
 
   for (i=0, l=needs.length; i<l; i++) {
     dependency = needs[i];
@@ -1272,8 +1266,11 @@ function verifyNeedsDependencies(controller, container, needs) {
 
     // Structure assert to still do verification but not string concat in production
     if (!container.has(dependency)) {
-      Ember.assert(Ember.inspect(controller) + " needs " + dependency + " but it does not exist", false);
+      missing.push(dependency);
     }
+  }
+  if (missing.length) {
+    throw new Ember.Error(Ember.inspect(controller) + " needs [ " + missing.join(', ') + " ] but " + (missing.length > 1 ? 'they' : 'it') + " could not be found");
   }
 }
 
@@ -1363,7 +1360,10 @@ Ember.ControllerMixin.reopen({
     length = get(needs, 'length');
 
     if (length > 0) {
-      Ember.assert(' `' + Ember.inspect(this) + ' specifies `needs`, but does not have a container. Please ensure this controller was instantiated with a container.', this.container || Ember.meta(this, false).descs.controllers !== defaultControllersComputedProperty);
+      Ember.assert(' `' + Ember.inspect(this) + ' specifies `needs`, but does ' +
+                   "not have a container. Please ensure this controller was " +
+                   "instantiated with a container.",
+                   this.container || Ember.meta(this, false).descs.controllers !== defaultControllersComputedProperty);
 
       if (this.container) {
         verifyNeedsDependencies(this, this.container, needs);
