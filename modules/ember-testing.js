@@ -354,11 +354,7 @@ Ember.Application.reopen({
   setupForTesting: function() {
     Ember.testing = true;
 
-    if (Ember.FEATURES.isEnabled('ember-testing-lazy-routing')){
-      this.testing = true;
-    } else {
-      this.deferReadiness();
-    }
+    this.testing = true;
 
     this.Router.reopen({
       location: 'none'
@@ -509,17 +505,15 @@ function isolate(fn, val) {
 
 (function() {
 Ember.onLoad('Ember.Application', function(Application) {
-  if (Ember.FEATURES.isEnabled('ember-testing-lazy-routing')){
-    Application.initializer({
-      name: 'deferReadiness in `testing` mode',
+  Application.initializer({
+    name: 'deferReadiness in `testing` mode',
 
-      initialize: function(container, application){
-        if (application.testing) {
-          application.deferReadiness();
-        }
+    initialize: function(container, application){
+      if (application.testing) {
+        application.deferReadiness();
       }
-    });
-  }
+    }
+  });
 
   if (Ember.FEATURES.isEnabled('ember-testing-simple-setup')){
     Application.initializer({
@@ -725,9 +719,7 @@ function currentURL(app){
 }
 
 function visit(app, url) {
-  if (Ember.FEATURES.isEnabled('ember-testing-lazy-routing')){
-    Ember.run(app, 'advanceReadiness');
-  }
+  Ember.run(app, 'advanceReadiness');
 
   app.__container__.lookup('router:main').location.setURL(url);
   Ember.run(app, app.handleURL, url);
@@ -837,13 +829,11 @@ function wait(app, value) {
 
       // 3. If there are scheduled timers or we are inside of a run loop, keep polling
       if (Ember.run.hasScheduledTimers() || Ember.run.currentRunLoop) { return; }
-      if (Ember.FEATURES.isEnabled("ember-testing-wait-hooks")) {
-        if (Test.waiters && Test.waiters.any(function(waiter) {
-          var context = waiter[0];
-          var callback = waiter[1];
-          return !callback.call(context);
-        })) { return; }
-      }
+      if (Test.waiters && Test.waiters.any(function(waiter) {
+        var context = waiter[0];
+        var callback = waiter[1];
+        return !callback.call(context);
+      })) { return; }
       // Stop polling
       clearInterval(watcher);
 

@@ -983,10 +983,10 @@ Ember._HandlebarsBoundView = Ember._MetamorphView.extend({
         preserveContext = get(this, 'preserveContext'),
         context = get(this, 'previousContext');
 
-    var contextController;
+    var _contextController;
 
     if (Ember.FEATURES.isEnabled('with-controller')) {
-      contextController = get(this, 'contextController');
+      _contextController = get(this, '_contextController');
     }
 
     var inverseTemplate = get(this, 'inverseTemplate'),
@@ -1009,9 +1009,9 @@ Ember._HandlebarsBoundView = Ember._MetamorphView.extend({
       // If so, pass the specified object to the template
         if (displayTemplate) {
           if (Ember.FEATURES.isEnabled('with-controller')) {
-            if (contextController) {
-              set(contextController, 'content', result);
-              result = contextController;
+            if (_contextController) {
+              set(_contextController, 'content', result);
+              result = _contextController;
             }
           }
           set(this, '_context', result);
@@ -1116,8 +1116,10 @@ function bind(property, options, preserveContext, shouldDisplay, valueNormalizer
 
       if (Ember.FEATURES.isEnabled('with-controller'))  {
         if (options.hash.controller) {
-          bindView.set('contextController', this.container.lookupFactory('controller:'+options.hash.controller).create({
-            container: currentContext
+          bindView.set('_contextController', this.container.lookupFactory('controller:'+options.hash.controller).create({
+            container: currentContext.container,
+            parentController: currentContext,
+            target: currentContext
           }));
         }
       }
@@ -1351,6 +1353,56 @@ EmberHandlebars.registerHelper('unboundIf', function unboundIfHelper(property, f
 });
 
 /**
+  Use the `{{with}}` helper when you want to scope context. Take the following code as an example:
+
+  ```handlebars
+  <h5>{{user.name}}</h5>
+
+  <div class="role">
+    <h6>{{user.role.label}}</h6>
+    <span class="role-id">{{user.role.id}}</span>
+
+    <p class="role-desc">{{user.role.description}}</p>
+  </div>
+  ```
+
+  `{{with}}` can be our best friend in these cases, 
+  instead of writing `user.role.*` over and over, we use `{{#with user.role}}`.
+  Now the context within the `{{#with}} .. {{/with}}` block is `user.role` so you can do the following:
+
+  ```handlebars
+  <h5>{{user.name}}</h5>
+
+  <div class="role">
+    {{#with user.role}}
+      <h6>{{label}}</h6>
+      <span class="role-id">{{id}}</span>
+
+      <p class="role-desc">{{description}}</p>
+    {{/with}}
+  </div>
+  ```
+
+  ### `as` operator
+
+  This operator aliases the scope to a new name. It's helpful for semantic clarity and to retain 
+  default scope or to reference from another `{{with}}` block.
+
+  ```handlebars
+  // posts might not be
+  {{#with user.posts as blogPosts}}
+    <div class="notice">
+      There are {{blogPosts.length}} blog posts written by {{user.name}}.
+    </div>
+
+    {{#each post in blogPosts}}
+      <li>{{post.title}}</li>
+    {{/each}}
+  {{/with}}
+  ```
+
+  Without the `as` operator, it would be impossible to reference `user.name` in the example above.
+
   @method with
   @for Ember.Handlebars.helpers
   @param {Function} context
@@ -2311,11 +2363,20 @@ Ember.Handlebars.registerHelper('collection', function collectionHelper(path, op
   var inverse = options.inverse;
   var view = options.data.view;
 
+
+  var controller, container;
   // If passed a path string, convert that into an object.
   // Otherwise, just default to the standard class.
   var collectionClass;
-  collectionClass = path ? handlebarsGet(this, path, options) : Ember.CollectionView;
-  Ember.assert(fmt("%@ #collection: Could not find collection class %@", [data.view, path]), !!collectionClass);
+  if (path) {
+    controller = data.keywords.controller;
+    container = controller && controller.container;
+    collectionClass = handlebarsGet(this, path, options) || container.lookupFactory('view:' + path); 
+    Ember.assert(fmt("%@ #collection: Could not find collection class %@", [data.view, path]), !!collectionClass);
+  }
+  else {
+    collectionClass = Ember.CollectionView;
+  }
 
   var hash = options.hash, itemHash = {}, match;
 
@@ -2324,15 +2385,15 @@ Ember.Handlebars.registerHelper('collection', function collectionHelper(path, op
       itemViewClass;
 
   if (hash.itemView) {
-    var controller = data.keywords.controller;
+    controller = data.keywords.controller;
     Ember.assert('You specified an itemView, but the current context has no ' +
                  'container to look the itemView up in. This probably means ' +
                  'that you created a view manually, instead of through the ' +
                  'container. Instead, use container.lookup("view:viewName"), ' +
                  'which will properly instantiate your view.',
                  controller && controller.container);
-    var container = controller.container;
-    itemViewClass = container.resolve('view:' + hash.itemView);
+    container = controller.container;
+    itemViewClass = container.lookupFactory('view:' + hash.itemView);
     Ember.assert('You specified the itemView ' + hash.itemView + ", but it was " +
                  "not found at " + container.describe("view:" + hash.itemView) +
                  " (and it was not registered in the container)", !!itemViewClass);

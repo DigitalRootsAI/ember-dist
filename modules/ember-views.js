@@ -4723,6 +4723,70 @@ Ember.CollectionView.CONTAINER_MAP = {
 
 
 (function() {
+/**
+  The ComponentTemplateDeprecation mixin is used to provide a useful
+  deprecation warning when using either `template` or `templateName` with
+  a component. The `template` and `templateName` properties specified at
+  extend time are moved to `layout` and `layoutName` respectively.
+
+  `Ember.ComponentTemplateDeprecation` is used internally by Ember in
+  `Ember.Component`.
+
+  @class ComponentTemplateDeprecation
+  @namespace Ember
+*/
+Ember.ComponentTemplateDeprecation = Ember.Mixin.create({
+  /**
+    @private
+
+    Moves `templateName` to `layoutName` and `template` to `layout` at extend
+    time if a layout is not also specified.
+
+    Note that this currently modifies the mixin themselves, which is technically
+    dubious but is practically of little consequence. This may change in the
+    future.
+
+    @method willMergeMixin
+  */
+  willMergeMixin: function(props) {
+    // must call _super here to ensure that the ActionHandler
+    // mixin is setup properly (moves actions -> _actions)
+    //
+    // Calling super is only OK here since we KNOW that
+    // there is another Mixin loaded first.
+    this._super.apply(this, arguments);
+
+    var deprecatedProperty, replacementProperty,
+        layoutSpecified = (props.layoutName || props.layout);
+
+    if (props.templateName && !layoutSpecified) {
+      deprecatedProperty = 'templateName';
+      replacementProperty = 'layoutName';
+
+      props.layoutName = props.templateName;
+      delete props['templateName'];
+    }
+
+    if (props.template && !layoutSpecified) {
+      deprecatedProperty = 'template';
+      replacementProperty = 'layout';
+
+      props.layout = props.template;
+      delete props['template'];
+    }
+
+    if (deprecatedProperty) {
+      Ember.deprecate('Do not specify ' + deprecatedProperty + ' on a Component, use ' + replacementProperty + ' instead.', false);
+    }
+  }
+});
+
+
+})();
+
+
+
+(function() {
 var get = Ember.get, set = Ember.set, isNone = Ember.isNone,
     a_slice = Array.prototype.slice;
 
@@ -4817,7 +4881,7 @@ var get = Ember.get, set = Ember.set, isNone = Ember.isNone,
   @namespace Ember
   @extends Ember.View
 */
-Ember.Component = Ember.View.extend(Ember.TargetActionSupport, {
+Ember.Component = Ember.View.extend(Ember.TargetActionSupport, Ember.ComponentTemplateDeprecation, {
   init: function() {
     this._super();
     set(this, 'context', this);
@@ -4828,6 +4892,45 @@ Ember.Component = Ember.View.extend(Ember.TargetActionSupport, {
     options.data = {view: options._context};
     Ember.Handlebars.helpers['yield'].apply(this, [options]);
   },
+
+  /**
+  A components template property is set by passing a block
+  during its invocation. It is executed within the parent context.
+
+  Example:
+
+  ```handlebars
+  {{#my-component}}
+    // something that is run in the context
+    // of the parent context
+  {{/my-component}}
+  ```
+
+  Specifying a template directly to a component is deprecated without
+  also specifying the layout property.
+
+  @deprecated
+  @property template
+  */
+  template: Ember.computed(function(key, value) {
+    if (value !== undefined) { return value; }
+
+    var templateName = get(this, 'templateName'),
+        template = this.templateForName(templateName, 'template');
+
+    Ember.assert("You specified the templateName " + templateName + " for " + this + ", but it did not exist.", !templateName || template);
+
+    return template || get(this, 'defaultTemplate');
+  }).property('templateName'),
+
+  /**
+  Specifying a components `templateName` is deprecated without also
+  providing the `layout` or `layoutName` properties.
+
+  @deprecated
+  @property templateName
+  */
+  templateName: null,
 
   // during render, isolate keywords
   cloneKeywords: function() {

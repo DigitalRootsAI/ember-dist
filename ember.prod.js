@@ -5,7 +5,7 @@
  *            Portions Copyright 2008-2011 Apple Inc. All rights reserved.
  * @license   Licensed under MIT license
  *            See https://raw.github.com/emberjs/ember.js/master/LICENSE
- * @version   1.4.0-beta.1+canary.ed89e1ea
+ * @version   1.5.0-beta.1+canary.6fabe753
  */
 
 
@@ -88,7 +88,7 @@ var define, requireModule, require, requirejs;
 
   @class Ember
   @static
-  @version 1.4.0-beta.1+canary.ed89e1ea
+  @version 1.5.0-beta.1+canary.6fabe753
 */
 
 if ('undefined' === typeof Ember) {
@@ -115,10 +115,10 @@ Ember.toString = function() { return "Ember"; };
 /**
   @property VERSION
   @type String
-  @default '1.4.0-beta.1+canary.ed89e1ea'
+  @default '1.5.0-beta.1+canary.6fabe753'
   @static
 */
-Ember.VERSION = '1.4.0-beta.1+canary.ed89e1ea';
+Ember.VERSION = '1.5.0-beta.1+canary.6fabe753';
 
 /**
   Standard environmental variables. You can define these in a global `EmberENV`
@@ -593,17 +593,19 @@ var arrayIndexOf = isNativeFunc(Array.prototype.indexOf) ? Array.prototype.index
   return -1;
 };
 
-/**
-  Array polyfills to support ES5 features in older browsers.
 
-  @namespace Ember
-  @property ArrayPolyfills
-*/
-Ember.ArrayPolyfills = {
-  map: arrayMap,
-  forEach: arrayForEach,
-  indexOf: arrayIndexOf
-};
+  /**
+    Array polyfills to support ES5 features in older browsers.
+
+    @namespace Ember
+    @property ArrayPolyfills
+  */
+  Ember.ArrayPolyfills = {
+    map: arrayMap,
+    forEach: arrayForEach,
+    indexOf: arrayIndexOf
+  };
+
 
 if (Ember.SHIM_ES5) {
   if (!Array.prototype.map) {
@@ -851,18 +853,6 @@ var META_KEY = Ember.GUID_KEY+'_meta';
 */
 Ember.META_KEY = META_KEY;
 
-// Placeholder for non-writable metas.
-var EMPTY_META = {
-  descs: {},
-  watching: {}
-};
-
-if (MANDATORY_SETTER) { EMPTY_META.values = {}; }
-
-Ember.EMPTY_META = EMPTY_META;
-
-if (Object.freeze) Object.freeze(EMPTY_META);
-
 var isDefinePropertySimulated = Ember.platform.defineProperty.isSimulated;
 
 function Meta(obj) {
@@ -871,6 +861,21 @@ function Meta(obj) {
   this.cache = {};
   this.source = obj;
 }
+
+Meta.prototype = {
+  descs: null,
+  deps: null,
+  watching: null,
+  listeners: null,
+  cache: null,
+  source: null,
+  mixins: null,
+  bindings: null,
+  chains: null,
+  chainWatchers: null,
+  values: null,
+  proto: null
+};
 
 if (isDefinePropertySimulated) {
   // on platforms that don't support enumerable false
@@ -883,6 +888,13 @@ if (isDefinePropertySimulated) {
   // unless explicitly suppressed
   Meta.prototype.toJSON = function () { };
 }
+
+// Placeholder for non-writable metas.
+var EMPTY_META = new Meta(null);
+
+if (MANDATORY_SETTER) { EMPTY_META.values = {}; }
+
+Ember.EMPTY_META = EMPTY_META;
 
 /**
   Retrieves the meta hash for an object. If `writable` is true ensures the
@@ -1617,10 +1629,11 @@ Ember.subscribe = Ember.Instrumentation.subscribe;
 
 
 (function() {
-var map, forEach, indexOf, splice;
+var map, forEach, indexOf, splice, filter;
 map     = Array.prototype.map     || Ember.ArrayPolyfills.map;
 forEach = Array.prototype.forEach || Ember.ArrayPolyfills.forEach;
 indexOf = Array.prototype.indexOf || Ember.ArrayPolyfills.indexOf;
+filter = Array.prototype.filter || Ember.ArrayPolyfills.filter;
 splice = Array.prototype.splice;
 
 var utils = Ember.EnumerableUtils = {
@@ -1630,6 +1643,10 @@ var utils = Ember.EnumerableUtils = {
 
   forEach: function(obj, callback, thisArg) {
     return obj.forEach ? obj.forEach.call(obj, callback, thisArg) : forEach.call(obj, callback, thisArg);
+  },
+
+  filter: function(obj, callback, thisArg) {
+    return obj.filter ? obj.filter.call(obj, callback, thisArg) : filter.call(obj, callback, thisArg);
   },
 
   indexOf: function(obj, element, index) {
@@ -3341,6 +3358,12 @@ Ember.defineProperty = function(obj, keyName, desc, data, meta) {
     } else {
       obj[keyName] = undefined; // make enumerable
     }
+
+    
+      if (desc.func && desc._dependentCPs) {
+        addImplicitCPs(obj, desc._dependentCPs, meta);
+      }
+    
   } else {
     descs[keyName] = undefined; // shadow descriptor in proto
     if (desc == null) {
@@ -3375,6 +3398,22 @@ Ember.defineProperty = function(obj, keyName, desc, data, meta) {
 
   return this;
 };
+
+
+  var addImplicitCPs = function defineImplicitCPs(obj, implicitCPs, meta) {
+    var cp, key, length = implicitCPs.length;
+
+    for (var i=0; i<length; ++i) {
+      cp = implicitCPs[i];
+      key = cp.implicitCPKey;
+
+      Ember.defineProperty(obj, key, cp, undefined, meta);
+
+      if (cp._dependentCPs) {
+        addImplicitCPs(obj, cp._dependentCPs, meta);
+      }
+    }
+  };
 
 
 })();
@@ -4109,6 +4148,10 @@ var get = Ember.get,
     unwatch = Ember.unwatch;
 
 
+
+
+
+
   var expandProperties = Ember.expandProperties;
 
 
@@ -4270,9 +4313,10 @@ function removeDependentKeys(desc, obj, keyName, meta) {
 */
 function ComputedProperty(func, opts) {
   this.func = func;
-
+  
+    setDependentKeys(this, opts && opts.dependentKeys);
+  
   this._cacheable = (opts && opts.cacheable !== undefined) ? opts.cacheable : true;
-  this._dependentKeys = opts && opts.dependentKeys;
   this._readOnly = opts && (opts.readOnly !== undefined || !!opts.readOnly);
 }
 
@@ -4280,6 +4324,15 @@ Ember.ComputedProperty = ComputedProperty;
 ComputedProperty.prototype = new Ember.Descriptor();
 
 var ComputedPropertyPrototype = ComputedProperty.prototype;
+
+
+  ComputedPropertyPrototype.toString = function() {
+    if (this.implicitCPKey) {
+      return this.implicitCPKey;
+    }
+    return Ember.Descriptor.prototype.toString.apply(this, arguments);
+  };
+
 
 /**
   Properties are cacheable by default. Computed property will automatically
@@ -4385,7 +4438,9 @@ ComputedPropertyPrototype.property = function() {
       expandProperties(arguments[i], addArg);
     }
   
-  this._dependentKeys = args;
+  
+    setDependentKeys(this, args);
+  
   return this;
 };
 
@@ -4643,26 +4698,86 @@ function getProperties(self, propertyNames) {
   return ret;
 }
 
-function registerComputed(name, macro) {
-  Ember.computed[name] = function(dependentKey) {
-    var args = a_slice.call(arguments);
-    return Ember.computed(dependentKey, function() {
-      return macro.apply(this, args);
+var registerComputed, registerComputedWithProperties;
+
+
+  var guidFor = Ember.guidFor,
+      map = Ember.EnumerableUtils.map,
+      filter = Ember.EnumerableUtils.filter,
+      typeOf = Ember.typeOf;
+
+  var implicitKey = function (cp) {
+    return [guidFor(cp)].concat(cp._dependentKeys).join('_');
+  };
+
+  var normalizeDependentKey = function (key) {
+    if (key instanceof Ember.ComputedProperty) {
+      return implicitKey(key);
+    } else if (typeof key === 'string' || key instanceof String || typeof key === 'object' || typeof key === 'number') {
+      return key;
+    } else {
+          }
+  };
+
+  var normalizeDependentKeys = function (keys) {
+    return map(keys, function (key) {
+      return normalizeDependentKey(key);
     });
   };
-}
 
-function registerComputedWithProperties(name, macro) {
-  Ember.computed[name] = function() {
-    var properties = a_slice.call(arguments);
-
-    var computed = Ember.computed(function() {
-      return macro.apply(this, [getProperties(this, properties)]);
+  var selectDependentCPs = function (keys) {
+    return filter(keys, function (key) {
+      return key instanceof Ember.ComputedProperty;
     });
-
-    return computed.property.apply(computed, properties);
   };
-}
+
+  var setDependentKeys = function(cp, dependentKeys) {
+    if (dependentKeys) {
+      cp._dependentKeys = normalizeDependentKeys(dependentKeys);
+      cp._dependentCPs = selectDependentCPs(dependentKeys);
+      cp.implicitCPKey = implicitKey(cp);
+    } else {
+      cp._dependentKeys = cp._dependentCPs = [];
+      delete cp.implicitCPKey;
+    }
+  };
+  // expose `normalizeDependentKey[s]` so user CP macros can easily support
+  // composition
+  Ember.computed.normalizeDependentKey = normalizeDependentKey;
+  Ember.computed.normalizeDependentKeys = normalizeDependentKeys;
+
+  registerComputed = function (name, macro) {
+    Ember.computed[name] = function(dependentKey) {
+      var args = normalizeDependentKeys(a_slice.call(arguments));
+      return Ember.computed(dependentKey, function() {
+        return macro.apply(this, args);
+      });
+    };
+  };
+
+
+
+  registerComputedWithProperties = function(name, macro) {
+    Ember.computed[name] = function() {
+      var args = a_slice.call(arguments);
+      var properties = normalizeDependentKeys(args);
+
+      var computed = Ember.computed(function() {
+        return macro.apply(this, [getProperties(this, properties)]);
+      });
+
+      return computed.property.apply(computed, args);
+    };
+  };
+
+
+
+  Ember.computed.literal = function (value) {
+    return Ember.computed(function () {
+      return value;
+    });
+  };
+
 
 /**
   A computed property that returns true if the value of the dependent
@@ -4698,11 +4813,15 @@ registerComputed('empty', function(dependentKey) {
   A computed property that returns true if the value of the dependent
   property is NOT null, an empty string, empty array, or empty function.
 
+  Note: When using `Ember.computed.notEmpty` to watch an array make sure to
+  use the `array.[]` syntax so the computed can subscribe to transitions
+  from empty to non-empty states.
+
   Example
 
   ```javascript
   var Hamster = Ember.Object.extend({
-    hasStuff: Ember.computed.notEmpty('backpack')
+    hasStuff: Ember.computed.notEmpty('backpack.[]')
   });
   var hamster = Hamster.create({backpack: ['Food', 'Sleeping Bag', 'Tent']});
   hamster.get('hasStuff'); // true
@@ -7964,76 +8083,110 @@ Ember Metal
   @module RSVP
   */
 define("rsvp/all", 
-  ["./promise","./utils","exports"],
-  function(__dependency1__, __dependency2__, __exports__) {
+  ["./promise","exports"],
+  function(__dependency1__, __exports__) {
     "use strict";
-    /* global toString */
-
-    var Promise = __dependency1__.Promise;
-    var isArray = __dependency2__.isArray;
-    var isFunction = __dependency2__.isFunction;
+    var Promise = __dependency1__["default"];
 
     /**
-      Returns a promise that is fulfilled when all the given promises have been
-      fulfilled, or rejected if any of them become rejected. The return promise
-      is fulfilled with an array that gives all the values in the order they were
-      passed in the `promises` array argument.
-
-      Example:
-
-      ```javascript
-      var promise1 = RSVP.resolve(1);
-      var promise2 = RSVP.resolve(2);
-      var promise3 = RSVP.resolve(3);
-      var promises = [ promise1, promise2, promise3 ];
-
-      RSVP.all(promises).then(function(array){
-        // The array here would be [ 1, 2, 3 ];
-      });
-      ```
-
-      If any of the `promises` given to `RSVP.all` are rejected, the first promise
-      that is rejected will be given as an argument to the returned promises's
-      rejection handler. For example:
-
-      Example:
-
-      ```javascript
-      var promise1 = RSVP.resolve(1);
-      var promise2 = RSVP.reject(new Error("2"));
-      var promise3 = RSVP.reject(new Error("3"));
-      var promises = [ promise1, promise2, promise3 ];
-
-      RSVP.all(promises).then(function(array){
-        // Code here never runs because there are rejected promises!
-      }, function(error) {
-        // error.message === "2"
-      });
-      ```
+      This is a convenient alias for `RSVP.Promise.all`.
 
       @method all
       @for RSVP
-      @param {Array} promises
-      @param {String} label
-      @return {Promise} promise that is fulfilled when all `promises` have been
-      fulfilled, or rejected if any of them become rejected.
+      @param {Array} array Array of promises.
+      @param {String} label An optional label. This is useful
+      for tooling.
+      @static
     */
-    function all(promises, label) {
-      if (!isArray(promises)) {
-        throw new TypeError('You must pass an array to all.');
-      }
+    __exports__["default"] = function all(array, label) {
+      return Promise.all(array, label);
+    };
+  });
+define("rsvp/all_settled", 
+  ["./promise","./utils","exports"],
+  function(__dependency1__, __dependency2__, __exports__) {
+    "use strict";
+    var Promise = __dependency1__["default"];
+    var isArray = __dependency2__.isArray;
+    var isNonThenable = __dependency2__.isNonThenable;
 
+    /**
+      `RSVP.allSettled` is similar to `RSVP.all`, but instead of implementing
+      a fail-fast method, it waits until all the promises have returned and
+      shows you all the results. This is useful if you want to handle multiple
+      promises' failure states together as a set.
+
+      Returns a promise that is fulfilled when all the given promises have been
+      settled. The return promise is fulfilled with an array of the states of
+      the promises passed into the `promises` array argument.
+
+      Each state object will either indicate fulfillment or rejection, and
+      provide the corresponding value or reason. The states will take one of
+      the following formats:
+
+      ```javascript
+      { state: 'fulfilled', value: value }
+        or
+      { state: 'rejected', reason: reason }
+      ```
+
+      Example:
+
+      ```javascript
+      var promise1 = RSVP.Promise.resolve(1);
+      var promise2 = RSVP.Promise.reject(new Error('2'));
+      var promise3 = RSVP.Promise.reject(new Error('3'));
+      var promises = [ promise1, promise2, promise3 ];
+
+      RSVP.allSettled(promises).then(function(array){
+        // array == [
+        //   { state: 'fulfilled', value: 1 },
+        //   { state: 'rejected', reason: Error },
+        //   { state: 'rejected', reason: Error }
+        // ]
+        // Note that for the second item, reason.message will be "2", and for the
+        // third item, reason.message will be "3".
+      }, function(error) {
+        // Not run. (This block would only be called if allSettled had failed,
+        // for instance if passed an incorrect argument type.)
+      });
+      ```
+
+      @method allSettled
+      @for RSVP
+      @param {Array} promises
+      @param {String} label - optional string that describes the promise.
+      Useful for tooling.
+      @return {Promise} promise that is fulfilled with an array of the settled
+      states of the constituent promises.
+      @static
+    */
+
+    __exports__["default"] = function allSettled(entries, label) {
       return new Promise(function(resolve, reject) {
-        var results = [], remaining = promises.length,
-        promise;
+        if (!isArray(entries)) {
+          throw new TypeError('You must pass an array to allSettled.');
+        }
+
+        var remaining = entries.length;
+        var entry;
 
         if (remaining === 0) {
           resolve([]);
+          return;
         }
 
-        function resolver(index) {
+        var results = new Array(remaining);
+
+        function fulfilledResolver(index) {
           return function(value) {
-            resolveAll(index, value);
+            resolveAll(index, fulfilled(value));
+          };
+        }
+
+        function rejectedResolver(index) {
+          return function(reason) {
+            resolveAll(index, rejected(reason));
           };
         }
 
@@ -8044,98 +8197,31 @@ define("rsvp/all",
           }
         }
 
-        for (var i = 0; i < promises.length; i++) {
-          promise = promises[i];
+        for (var index = 0; index < entries.length; index++) {
+          entry = entries[index];
 
-          if (promise && isFunction(promise.then)) {
-            promise.then(resolver(i), reject, "RSVP: RSVP#all");
+          if (isNonThenable(entry)) {
+            resolveAll(index, fulfilled(entry));
           } else {
-            resolveAll(i, promise);
+            Promise.cast(entry).then(fulfilledResolver(index), rejectedResolver(index));
           }
         }
       }, label);
+    };
+
+    function fulfilled(value) {
+      return { state: 'fulfilled', value: value };
     }
 
-    __exports__.all = all;
-  });
-
-define("rsvp/cast", 
-  ["exports"],
-  function(__exports__) {
-    "use strict";
-    /**
-      `RSVP.Promise.cast` returns the same promise if that promise shares a constructor
-      with the promise being casted.
-
-      Example:
-
-      ```javascript
-      var promise = RSVP.resolve(1);
-      var casted = RSVP.Promise.cast(promise);
-
-      console.log(promise === casted); // true
-      ```
-
-      In the case of a promise whose constructor does not match, it is assimilated.
-      The resulting promise will fulfill or reject based on the outcome of the
-      promise being casted.
-
-      In the case of a non-promise, a promise which will fulfill with that value is
-      returned.
-
-      Example:
-
-      ```javascript
-      var value = 1; // could be a number, boolean, string, undefined...
-      var casted = RSVP.Promise.cast(value);
-
-      console.log(value === casted); // false
-      console.log(casted instanceof RSVP.Promise) // true
-
-      casted.then(function(val) {
-        val === value // => true
-      });
-      ```
-
-      `RSVP.Promise.cast` is similar to `RSVP.resolve`, but `RSVP.Promise.cast` differs in the
-      following ways:
-
-      * `RSVP.Promise.cast` serves as a memory-efficient way of getting a promise, when you
-      have something that could either be a promise or a value. RSVP.resolve
-      will have the same effect but will create a new promise wrapper if the
-      argument is a promise.
-      * `RSVP.Promise.cast` is a way of casting incoming thenables or promise subclasses to
-      promises of the exact class specified, so that the resulting object's `then` is
-      ensured to have the behavior of the constructor you are calling cast on (i.e., RSVP.Promise).
-
-      @method cast
-      @for RSVP
-      @param {Object} object to be casted
-      @return {Promise} promise that is fulfilled when all properties of `promises`
-      have been fulfilled, or rejected if any of them become rejected.
-    */
-
-
-    function cast(object) {
-      /*jshint validthis:true */
-      if (object && typeof object === 'object' && object.constructor === this) {
-        return object;
-      }
-
-      var Promise = this;
-
-      return new Promise(function(resolve) {
-        resolve(object);
-      });
+    function rejected(reason) {
+      return { state: 'rejected', reason: reason };
     }
-
-    __exports__.cast = cast;
   });
 define("rsvp/config", 
   ["./events","exports"],
   function(__dependency1__, __exports__) {
     "use strict";
-    var EventTarget = __dependency1__.EventTarget;
+    var EventTarget = __dependency1__["default"];
 
     var config = {
       instrument: false
@@ -8166,10 +8252,10 @@ define("rsvp/defer",
   ["./promise","exports"],
   function(__dependency1__, __exports__) {
     "use strict";
-    var Promise = __dependency1__.Promise;
+    var Promise = __dependency1__["default"];
 
     /**
-      `RSVP.defer` returns an object similar to jQuery's `$.Deferred` objects.
+      `RSVP.defer` returns an object similar to jQuery's `$.Deferred`.
       `RSVP.defer` should be used when porting over code reliant on `$.Deferred`'s
       interface. New code should use the `RSVP.Promise` constructor instead.
 
@@ -8195,17 +8281,13 @@ define("rsvp/defer",
 
       @method defer
       @for RSVP
-      @param {String} -
+      @param {String} label optional string for labeling the promise.
+      Useful for tooling.
       @return {Object}
      */
 
-    function defer(label) {
-      var deferred = {
-        // pre-allocate shape
-        resolve: undefined,
-        reject:  undefined,
-        promise: undefined
-      };
+    __exports__["default"] = function defer(label) {
+      var deferred = { };
 
       deferred.promise = new Promise(function(resolve, reject) {
         deferred.resolve = resolve;
@@ -8213,9 +8295,7 @@ define("rsvp/defer",
       }, label);
 
       return deferred;
-    }
-
-    __exports__.defer = defer;
+    };
   });
 define("rsvp/events", 
   ["exports"],
@@ -8240,10 +8320,9 @@ define("rsvp/events",
     };
 
     /**
-      //@module RSVP
-      //@class EventTarget
+      @class RSVP.EventTarget
     */
-    var EventTarget = {
+    __exports__["default"] = {
 
       /**
         `RSVP.EventTarget.mixin` extends an object with EventTarget methods. For
@@ -8361,6 +8440,7 @@ define("rsvp/events",
         argument is given, all callbacks will be removed from the event's callback
         queue.
         @private
+
       */
       off: function(eventName, callback) {
         var allCallbacks = callbacksFor(this), callbacks, index;
@@ -8420,25 +8500,130 @@ define("rsvp/events",
         }
       }
     };
+  });
+define("rsvp/filter", 
+  ["./all","./map","./utils","exports"],
+  function(__dependency1__, __dependency2__, __dependency3__, __exports__) {
+    "use strict";
+    var all = __dependency1__["default"];
+    var map = __dependency2__["default"];
+    var isFunction = __dependency3__.isFunction;
+    var isArray = __dependency3__.isArray;
 
-    __exports__.EventTarget = EventTarget;
+    /**
+     `RSVP.filter` is similar to JavaScript's native `filter` method, except that it
+      waits for all promises to become fulfilled before running the `filterFn` on
+      each item in given to `promises`. `RSVP.filter` returns a promise that will
+      become fulfilled with the result of running `filterFn` on the values the
+      promises become fulfilled with.
+
+      For example:
+
+      ```javascript
+
+      var promise1 = RSVP.resolve(1);
+      var promise2 = RSVP.resolve(2);
+      var promise3 = RSVP.resolve(3);
+
+      var filterFn = function(item){
+        return item > 1;
+      };
+
+      RSVP.filter(promises, filterFn).then(function(result){
+        // result is [ 2, 3 ]
+      });
+      ```
+
+      If any of the `promises` given to `RSVP.filter` are rejected, the first promise
+      that is rejected will be given as an argument to the returned promise's
+      rejection handler. For example:
+
+      ```javascript
+      var promise1 = RSVP.resolve(1);
+      var promise2 = RSVP.reject(new Error("2"));
+      var promise3 = RSVP.reject(new Error("3"));
+      var promises = [ promise1, promise2, promise3 ];
+
+      var filterFn = function(item){
+        return item > 1;
+      };
+
+      RSVP.filter(promises, filterFn).then(function(array){
+        // Code here never runs because there are rejected promises!
+      }, function(reason) {
+        // reason.message === "2"
+      });
+      ```
+
+      `RSVP.filter` will also wait for any promises returned from `filterFn`.
+      For instance, you may want to fetch a list of users then return a subset
+      of those users based on some asynchronous operation:
+
+      ```javascript
+
+      var alice = { name: 'alice' };
+      var bob   = { name: 'bob' };
+      var users = [ alice, bob ];
+
+      var promises = users.map(function(user){
+        return RSVP.resolve(user);
+      });
+
+      var filterFn = function(user){
+        // Here, Alice has permissions to create a blog post, but Bob does not.
+        return getPrivilegesForUser(user).then(function(privs){
+          return privs.can_create_blog_post === true;
+        });
+      };
+      RSVP.filter(promises, filterFn).then(function(users){
+        // true, because the server told us only Alice can create a blog post.
+        users.length === 1;
+        // false, because Alice is the only user present in `users`
+        users[0] === bob;
+      });
+      ```
+
+      @method filter
+      @for RSVP
+      @param {Array} promises
+      @param {Function} filterFn - function to be called on each resolved value to
+      filter the final results.
+      @param {String} label optional string describing the promise. Useful for
+      tooling.
+      @return {Promise}
+    */
+    function filter(promises, filterFn, label) {
+      return all(promises, label).then(function(values){
+        if (!isArray(promises)) {
+          throw new TypeError('You must pass an array to filter.');
+        }
+
+        if (!isFunction(filterFn)){
+          throw new TypeError("You must pass a function to filter's second argument.");
+        }
+
+        return map(promises, filterFn, label).then(function(filterResults){
+           var i,
+               valuesLen = values.length,
+               filtered = [];
+
+           for (i = 0; i < valuesLen; i++){
+             if(filterResults[i]) filtered.push(values[i]);
+           }
+           return filtered;
+        });
+      });
+    }
+
+    __exports__["default"] = filter;
   });
 define("rsvp/hash", 
   ["./promise","./utils","exports"],
   function(__dependency1__, __dependency2__, __exports__) {
     "use strict";
-    var Promise = __dependency1__.Promise;
-    var isFunction = __dependency2__.isFunction;
-
-    var keysOf = Object.keys || function(object) {
-      var result = [];
-
-      for (var prop in object) {
-        result.push(prop);
-      }
-
-      return result;
-    };
+    var Promise = __dependency1__["default"];
+    var isNonThenable = __dependency2__.isNonThenable;
+    var keysOf = __dependency2__.keysOf;
 
     /**
       `RSVP.hash` is similar to `RSVP.all`, but takes an object instead of an array
@@ -8472,8 +8657,9 @@ define("rsvp/hash",
       ````
 
       If any of the `promises` given to `RSVP.hash` are rejected, the first promise
-      that is rejected will be given as as the first argument, or as the reason to
-      the rejection handler. For example:
+      that is rejected will be given as the reason to the rejection handler.
+
+      Example:
 
       ```javascript
       var promises = {
@@ -8521,52 +8707,53 @@ define("rsvp/hash",
       @method hash
       @for RSVP
       @param {Object} promises
-      @param {String} label - optional string that describes the promise.
+      @param {String} label optional string that describes the promise.
       Useful for tooling.
       @return {Promise} promise that is fulfilled when all properties of `promises`
       have been fulfilled, or rejected if any of them become rejected.
+      @static
     */
-    function hash(object, label) {
-      var results = {},
-          keys = keysOf(object),
-          remaining = keys.length;
-
+    __exports__["default"] = function hash(object, label) {
       return new Promise(function(resolve, reject){
-        var promise, prop;
+        var results = {};
+        var keys = keysOf(object);
+        var remaining = keys.length;
+        var entry, property;
 
         if (remaining === 0) {
-          resolve({});
+          resolve(results);
           return;
         }
 
-        var resolver = function(prop) {
+       function fulfilledTo(property) {
           return function(value) {
-            resolveAll(prop, value);
+            results[property] = value;
+            if (--remaining === 0) {
+              resolve(results);
+            }
           };
-        };
+        }
 
-        var resolveAll = function(prop, value) {
-          results[prop] = value;
-          if (--remaining === 0) {
-            resolve(results);
-          }
-        };
+        function onRejection(reason) {
+          remaining = 0;
+          reject(reason);
+        }
 
+        for (var i = 0; i < keys.length; i++) {
+          property = keys[i];
+          entry = object[property];
 
-        for (var i = 0, l = keys.length; i < l; i ++) {
-          prop = keys[i];
-          promise = object[prop];
-
-          if (promise && isFunction(promise.then)) {
-            promise.then(resolver(prop), reject, "RSVP: RSVP#hash");
+          if (isNonThenable(entry)) {
+            results[property] = entry;
+            if (--remaining === 0) {
+              resolve(results);
+            }
           } else {
-            resolveAll(prop, promise);
+            Promise.cast(entry).then(fulfilledTo(property), onRejection);
           }
         }
       });
-    }
-
-    __exports__.hash = hash;
+    };
   });
 define("rsvp/instrument", 
   ["./config","./utils","exports"],
@@ -8575,7 +8762,7 @@ define("rsvp/instrument",
     var config = __dependency1__.config;
     var now = __dependency2__.now;
 
-    function instrument(eventName, promise, child) {
+    __exports__["default"] = function instrument(eventName, promise, child) {
       // instrumentation should not disrupt normal usage.
       try {
         config.trigger(eventName, {
@@ -8584,23 +8771,130 @@ define("rsvp/instrument",
           detail: promise._detail,
           childGuid: child && promise._guidKey + child._id,
           label: promise._label,
-          timeStamp: now()
+          timeStamp: now(),
+          stack: new Error(promise._label).stack
         });
       } catch(error) {
         setTimeout(function(){
           throw error;
         }, 0);
       }
-    }
+    };
+  });
+define("rsvp/map", 
+  ["./promise","./all","./utils","exports"],
+  function(__dependency1__, __dependency2__, __dependency3__, __exports__) {
+    "use strict";
+    var Promise = __dependency1__["default"];
+    var all = __dependency2__["default"];
+    var isArray = __dependency3__.isArray;
+    var isFunction = __dependency3__.isFunction;
 
-    __exports__.instrument = instrument;
+    /**
+     `RSVP.map` is similar to JavaScript's native `map` method, except that it
+      waits for all promises to become fulfilled before running the `mapFn` on
+      each item in given to `promises`. `RSVP.map` returns a promise that will
+      become fulfilled with the result of running `mapFn` on the values the promises
+      become fulfilled with.
+
+      For example:
+
+      ```javascript
+
+      var promise1 = RSVP.resolve(1);
+      var promise2 = RSVP.resolve(2);
+      var promise3 = RSVP.resolve(3);
+      var promises = [ promise1, promise2, promise3 ];
+
+      var mapFn = function(item){
+        return item + 1;
+      };
+
+      RSVP.map(promises, mapFn).then(function(result){
+        // result is [ 2, 3, 4 ]
+      });
+      ```
+
+      If any of the `promises` given to `RSVP.map` are rejected, the first promise
+      that is rejected will be given as an argument to the returned promise's
+      rejection handler. For example:
+
+      ```javascript
+      var promise1 = RSVP.resolve(1);
+      var promise2 = RSVP.reject(new Error("2"));
+      var promise3 = RSVP.reject(new Error("3"));
+      var promises = [ promise1, promise2, promise3 ];
+
+      var mapFn = function(item){
+        return item + 1;
+      };
+
+      RSVP.map(promises, mapFn).then(function(array){
+        // Code here never runs because there are rejected promises!
+      }, function(reason) {
+        // reason.message === "2"
+      });
+      ```
+
+      `RSVP.map` will also wait if a promise is returned from `mapFn`. For example,
+      say you want to get all comments from a set of blog posts, but you need
+      the blog posts first becuase they contain a url to those comments.
+
+      ```javscript
+
+      var mapFn = function(blogPost){
+        // getComments does some ajax and returns an RSVP.Promise that is fulfilled
+        // with some comments data
+        return getComments(blogPost.comments_url);
+      };
+
+      // getBlogPosts does some ajax and returns an RSVP.Promise that is fulfilled
+      // with some blog post data
+      RSVP.map(getBlogPosts(), mapFn).then(function(comments){
+        // comments is the result of asking the server for the comments
+        // of all blog posts returned from getBlogPosts()
+      });
+      ```
+
+      @method map
+      @for RSVP
+      @param {Array} promises
+      @param {Function} mapFn function to be called on each fulfilled promise.
+      @param {String} label optional string for labeling the promise.
+      Useful for tooling.
+      @return {Promise} promise that is fulfilled with the result of calling
+      `mapFn` on each fulfilled promise or value when they become fulfilled.
+       The promise will be rejected if any of the given `promises` become rejected.
+      @static
+    */
+    __exports__["default"] = function map(promises, mapFn, label) {
+      return all(promises, label).then(function(results){
+        if (!isArray(promises)) {
+          throw new TypeError('You must pass an array to map.');
+        }
+
+        if (!isFunction(mapFn)){
+          throw new TypeError("You must pass a function to map's second argument.");
+        }
+
+
+        var resultLen = results.length,
+            mappedResults = [],
+            i;
+
+        for (i = 0; i < resultLen; i++){
+          mappedResults.push(mapFn(results[i]));
+        }
+
+        return all(mappedResults, label);
+      });
+    };
   });
 define("rsvp/node", 
-  ["./promise","./all","exports"],
-  function(__dependency1__, __dependency2__, __exports__) {
+  ["./promise","exports"],
+  function(__dependency1__, __exports__) {
     "use strict";
-    var Promise = __dependency1__.Promise;
-    var all = __dependency2__.all;
+    var Promise = __dependency1__["default"];
 
     var slice = Array.prototype.slice;
 
@@ -8689,14 +8983,15 @@ define("rsvp/node",
       calling the `nodeFunc` function.
       @return {Function} a function that wraps `nodeFunc` to return an
       `RSVP.Promise`
+      @static
     */
-    function denodeify(nodeFunc, binding) {
+    __exports__["default"] = function denodeify(nodeFunc, binding) {
       return function()  {
         var nodeArgs = slice.call(arguments), resolve, reject;
         var thisArg = this || binding;
 
         return new Promise(function(resolve, reject) {
-          all(nodeArgs).then(function(nodeArgs) {
+          Promise.all(nodeArgs).then(function(nodeArgs) {
             try {
               nodeArgs.push(makeNodeCallbackFor(resolve, reject));
               nodeFunc.apply(thisArg, nodeArgs);
@@ -8706,25 +9001,137 @@ define("rsvp/node",
           });
         });
       };
-    }
-
-    __exports__.denodeify = denodeify;
+    };
   });
 define("rsvp/promise", 
-  ["./config","./events","./cast","./instrument","./utils","exports"],
-  function(__dependency1__, __dependency2__, __dependency3__, __dependency4__, __dependency5__, __exports__) {
+  ["./config","./events","./instrument","./utils","./promise/cast","./promise/all","./promise/race","./promise/resolve","./promise/reject","exports"],
+  function(__dependency1__, __dependency2__, __dependency3__, __dependency4__, __dependency5__, __dependency6__, __dependency7__, __dependency8__, __dependency9__, __exports__) {
     "use strict";
     var config = __dependency1__.config;
-    var EventTarget = __dependency2__.EventTarget;
-    var cast = __dependency3__.cast;
-    var instrument = __dependency4__.instrument;
-    var objectOrFunction = __dependency5__.objectOrFunction;
-    var isFunction = __dependency5__.isFunction;
-    var now = __dependency5__.now;
+    var EventTarget = __dependency2__["default"];
+    var instrument = __dependency3__["default"];
+    var objectOrFunction = __dependency4__.objectOrFunction;
+    var isFunction = __dependency4__.isFunction;
+    var now = __dependency4__.now;
+    var cast = __dependency5__["default"];
+    var all = __dependency6__["default"];
+    var race = __dependency7__["default"];
+    var Resolve = __dependency8__["default"];
+    var Reject = __dependency9__["default"];
 
     var guidKey = 'rsvp_' + now() + '-';
     var counter = 0;
 
+    function noop() {}
+
+    __exports__["default"] = Promise;
+
+
+    /**
+      Promise objects represent the eventual result of an asynchronous operation. The
+      primary way of interacting with a promise is through its `then` method, which
+      registers callbacks to receive either a promise’s eventual value or the reason
+      why the promise cannot be fulfilled.
+
+      Terminology
+      -----------
+
+      - `promise` is an object or function with a `then` method whose behavior conforms to this specification.
+      - `thenable` is an object or function that defines a `then` method.
+      - `value` is any legal JavaScript value (including undefined, a thenable, or a promise).
+      - `exception` is a value that is thrown using the throw statement.
+      - `reason` is a value that indicates why a promise was rejected.
+      - `settled` the final resting state of a promise, fulfilled or rejected.
+
+      A promise can be in one of three states: pending, fulfilled, or rejected.
+
+      Promises that are fulfilled have a fulfillment value and are in the fulfilled
+      state.  Promises that are rejected have a rejection reason and are in the
+      rejected state.  A fulfillment value is never a thenable.  Similarly, a
+      rejection reason is never a thenable.
+
+      Promises can also be said to *resolve* a value.  If this value is also a
+      promise, then the original promise's settled state will match the value's
+      settled state.  So a promise that *resolves* a promise that rejects will
+      itself reject, and a promise that *resolves* a promise that fulfills will
+      itself fulfill.
+
+
+      Basic Usage:
+      ------------
+
+      ```js
+      var promise = new Promise(function(resolve, reject) {
+        // on success
+        resolve(value);
+
+        // on failure
+        reject(reason);
+      });
+
+      promise.then(function(value) {
+        // on fulfillment
+      }, function(reason) {
+        // on rejection
+      });
+      ```
+
+      Advanced Usage:
+      ---------------
+
+      Promises shine when abstracting away asynchronous interactions such as
+      `XMLHttpRequest`s.
+
+      ```js
+      function getJSON(url) {
+        return new Promise(function(resolve, reject){
+          var xhr = new XMLHttpRequest();
+
+          xhr.open('GET', url);
+          xhr.onreadystatechange = handler;
+          xhr.responseType = 'json';
+          xhr.setRequestHeader('Accept', 'application/json');
+          xhr.send();
+
+          function handler() {
+            if (this.readyState === this.DONE) {
+              if (this.status === 200) {
+                resolve(this.response);
+              } else {
+                reject(new Error("getJSON: `" + url + "` failed with status: [" + this.status + "]");
+              }
+            }
+          };
+        });
+      }
+
+      getJSON('/posts.json').then(function(json) {
+        // on fulfillment
+      }, function(reason) {
+        // on rejection
+      });
+      ```
+
+      Unlike callbacks, promises are great composable primitives.
+
+      ```js
+      Promise.all([
+        getJSON('/posts'),
+        getJSON('/comments')
+      ]).then(function(values){
+        values[0] // => postsJSON
+        values[1] // => commentsJSON
+
+        return values;
+      });
+      ```
+
+      @class RSVP.Promise
+      @param {function}
+      @param {String} label optional string for labeling the promise.
+      Useful for tooling.
+      @constructor
+    */
     function Promise(resolver, label) {
       if (!isFunction(resolver)) {
         throw new TypeError('You must pass a resolver function as the first argument to the promise constructor');
@@ -8742,7 +9149,9 @@ define("rsvp/promise",
         instrument('created', this);
       }
 
-      invokeResolver(resolver, this);
+      if (noop !== resolver) {
+        invokeResolver(resolver, this);
+      }
     }
 
     function invokeResolver(resolver, promise) {
@@ -8761,35 +9170,11 @@ define("rsvp/promise",
       }
     }
 
-    function invokeCallback(settled, promise, callback, detail) {
-      var hasCallback = isFunction(callback),
-          value, error, succeeded, failed;
-
-      if (hasCallback) {
-        try {
-          value = callback(detail);
-          succeeded = true;
-        } catch(e) {
-          failed = true;
-          error = e;
-        }
-      } else {
-        value = detail;
-        succeeded = true;
-      }
-
-      if (handleThenable(promise, value)) {
-        return;
-      } else if (hasCallback && succeeded) {
-        resolve(promise, value);
-      } else if (failed) {
-        reject(promise, error);
-      } else if (settled === FULFILLED) {
-        resolve(promise, value);
-      } else if (settled === REJECTED) {
-        reject(promise, value);
-      }
-    }
+    Promise.cast = cast;
+    Promise.all = all;
+    Promise.race = race;
+    Promise.resolve = Resolve;
+    Promise.reject = Reject;
 
     var PENDING   = void 0;
     var SEALED    = 0;
@@ -8837,11 +9222,205 @@ define("rsvp/promise",
         config.trigger('error', reason);
       },
 
+    /**
+      The primary way of interacting with a promise is through its `then` method,
+      which registers callbacks to receive either a promise's eventual value or the
+      reason why the promise cannot be fulfilled.
+
+      ```js
+      findUser().then(function(user){
+        // user is available
+      }, function(reason){
+        // user is unavailable, and you are given the reason why
+      });
+      ```
+
+      Chaining
+      --------
+
+      The return value of `then` is itself a promise.  This second, "downstream"
+      promise is resolved with the return value of the first promise's fulfillment
+      or rejection handler, or rejected if the handler throws an exception.
+
+      ```js
+      findUser().then(function (user) {
+        return user.name;
+      }, function (reason) {
+        return "default name";
+      }).then(function (userName) {
+        // If `findUser` fulfilled, `userName` will be the user's name, otherwise it
+        // will be `"default name"`
+      });
+
+      findUser().then(function (user) {
+        throw new Error("Found user, but still unhappy");
+      }, function (reason) {
+        throw new Error("`findUser` rejected and we're unhappy");
+      }).then(function (value) {
+        // never reached
+      }, function (reason) {
+        // if `findUser` fulfilled, `reason` will be "Found user, but still unhappy".
+        // If `findUser` rejected, `reason` will be "`findUser` rejected and we're unhappy".
+      });
+      ```
+      If the downstream promise does not specify a rejection handler, rejection reasons will be propagated further downstream.
+
+      ```js
+      findUser().then(function (user) {
+        throw new PedagogicalException("Upstream error");
+      }).then(function (value) {
+        // never reached
+      }).then(function (value) {
+        // never reached
+      }, function (reason) {
+        // The `PedgagocialException` is propagated all the way down to here
+      });
+      ```
+
+      Assimilation
+      ------------
+
+      Sometimes the value you want to propagate to a downstream promise can only be
+      retrieved asynchronously. This can be achieved by returning a promise in the
+      fulfillment or rejection handler. The downstream promise will then be pending
+      until the returned promise is settled. This is called *assimilation*.
+
+      ```js
+      findUser().then(function (user) {
+        return findCommentsByAuthor(user);
+      }).then(function (comments) {
+        // The user's comments are now available
+      });
+      ```
+
+      If the assimliated promise rejects, then the downstream promise will also reject.
+
+      ```js
+      findUser().then(function (user) {
+        return findCommentsByAuthor(user);
+      }).then(function (comments) {
+        // If `findCommentsByAuthor` fulfills, we'll have the value here
+      }, function (reason) {
+        // If `findCommentsByAuthor` rejects, we'll have the reason here
+      });
+      ```
+
+      Simple Example
+      --------------
+
+      Synchronous Example
+
+      ```javascript
+      var result;
+
+      try {
+        result = findResult();
+        // success
+      } catch(reason) {
+        // failure
+      }
+      ```
+
+      Errback Example
+
+      ```js
+      findResult(function(result, err){
+        if (err) {
+          // failure
+        } else {
+          // success
+        }
+      });
+      ```
+
+      Promise Example;
+
+      ```javascript
+      findResult().then(function(result){
+        // success
+      }, function(reason){
+        // failure
+      });
+      ```
+
+      Advanced Example
+      --------------
+
+      Synchronous Example
+
+      ```javascript
+      var author, books;
+
+      try {
+        author = findAuthor();
+        books  = findBooksByAuthor(author);
+        // success
+      } catch(reason) {
+        // failure
+      }
+      ```
+
+      Errback Example
+
+      ```js
+
+      function foundBooks(books) {
+
+      }
+
+      function failure(reason) {
+
+      }
+
+      findAuthor(function(author, err){
+        if (err) {
+          failure(err);
+          // failure
+        } else {
+          try {
+            findBoooksByAuthor(author, function(books, err) {
+              if (err) {
+                failure(err);
+              } else {
+                try {
+                  foundBooks(books);
+                } catch(reason) {
+                  failure(reason);
+                }
+              }
+            });
+          } catch(error) {
+            failure(err);
+          }
+          // success
+        }
+      });
+      ```
+
+      Promise Example;
+
+      ```javascript
+      findAuthor().
+        then(findBooksByAuthor).
+        then(function(books){
+          // found books
+      }).catch(function(reason){
+        // something went wrong
+      });
+      ```
+
+      @method then
+      @param {Function} onFulfilled
+      @param {Function} onRejected
+      @param {String} label optional string for labeling the promise.
+      Useful for tooling.
+      @return {Promise}
+    */
       then: function(onFulfillment, onRejection, label) {
         var promise = this;
         this._onerror = null;
 
-        var thenPromise = new this.constructor(function() {}, label);
+        var thenPromise = new this.constructor(noop, label);
 
         if (this._state) {
           var callbacks = arguments;
@@ -8859,10 +9438,78 @@ define("rsvp/promise",
         return thenPromise;
       },
 
+    /**
+      `catch` is simply sugar for `then(undefined, onRejection)` which makes it the same
+      as the catch block of a try/catch statement.
+
+      ```js
+      function findAuthor(){
+        throw new Error("couldn't find that author");
+      }
+
+      // synchronous
+      try {
+        findAuthor();
+      } catch(reason) {
+        // something went wrong
+      }
+
+      // async with promises
+      findAuthor().catch(function(reason){
+        // something went wrong
+      });
+      ```
+
+      @method catch
+      @param {Function} onRejection
+      @param {String} label optional string for labeling the promise.
+      Useful for tooling.
+      @return {Promise}
+    */
       'catch': function(onRejection, label) {
         return this.then(null, onRejection, label);
       },
 
+    /**
+      `finally` will be invoked regardless of the promise's fate just as native
+      try/catch/finally behaves
+
+      Synchronous example:
+
+      ```js
+      findAuthor() {
+        if (Math.random() > 0.5) {
+          throw new Error();
+        }
+        return new Author();
+      }
+
+      try {
+        return findAuthor(); // succeed or fail
+      } catch(error) {
+        return findOtherAuther();
+      } finally {
+        // always runs
+        // doesn't affect the return value
+      }
+      ```
+
+      Asynchronous example:
+
+      ```js
+      findAuthor().catch(function(reason){
+        return findOtherAuther();
+      }).finally(function(){
+        // author was either found, or not
+      });
+      ```
+
+      @method finally
+      @param {Function} callback
+      @param {String} label optional string for labeling the promise.
+      Useful for tooling.
+      @return {Promise}
+    */
       'finally': function(callback, label) {
         var constructor = this.constructor;
 
@@ -8878,7 +9525,35 @@ define("rsvp/promise",
       }
     };
 
-    Promise.cast = cast;
+    function invokeCallback(settled, promise, callback, detail) {
+      var hasCallback = isFunction(callback),
+          value, error, succeeded, failed;
+
+      if (hasCallback) {
+        try {
+          value = callback(detail);
+          succeeded = true;
+        } catch(e) {
+          failed = true;
+          error = e;
+        }
+      } else {
+        value = detail;
+        succeeded = true;
+      }
+
+      if (handleThenable(promise, value)) {
+        return;
+      } else if (hasCallback && succeeded) {
+        resolve(promise, value);
+      } else if (failed) {
+        reject(promise, error);
+      } else if (settled === FULFILLED) {
+        resolve(promise, value);
+      } else if (settled === REJECTED) {
+        reject(promise, value);
+      }
+    }
 
     function handleThenable(promise, value) {
       var then = null,
@@ -8907,7 +9582,7 @@ define("rsvp/promise",
               resolved = true;
 
               reject(promise, val);
-            }, 'Locked onto ' + (promise._label || ' unknown promise'));
+            }, 'derived from: ' + (promise._label || ' unknown promise'));
 
             return true;
           }
@@ -8956,21 +9631,205 @@ define("rsvp/promise",
 
       publish(promise, promise._state = REJECTED);
     }
-
-    __exports__.Promise = Promise;
   });
-define("rsvp/race", 
-  ["./promise","./utils","exports"],
-  function(__dependency1__, __dependency2__, __exports__) {
+define("rsvp/promise/all", 
+  ["../utils","exports"],
+  function(__dependency1__, __exports__) {
+    "use strict";
+    var isArray = __dependency1__.isArray;
+    var isNonThenable = __dependency1__.isNonThenable;
+
+    /**
+      `RSVP.Promise.all` accepts an array of promises, and returns a new promise which
+      is fulfilled with an array of fulfillment values for the passed promises, or
+      rejected with the reason of the first passed promise to be rejected. It casts all
+      elements of the passed iterable to promises as it runs this algorithm.
+
+      Example:
+
+      ```javascript
+      var promise1 = RSVP.resolve(1);
+      var promise2 = RSVP.resolve(2);
+      var promise3 = RSVP.resolve(3);
+      var promises = [ promise1, promise2, promise3 ];
+
+      RSVP.Promise.all(promises).then(function(array){
+        // The array here would be [ 1, 2, 3 ];
+      });
+      ```
+
+      If any of the `promises` given to `RSVP.all` are rejected, the first promise
+      that is rejected will be given as an argument to the returned promises's
+      rejection handler. For example:
+
+      Example:
+
+      ```javascript
+      var promise1 = RSVP.resolve(1);
+      var promise2 = RSVP.reject(new Error("2"));
+      var promise3 = RSVP.reject(new Error("3"));
+      var promises = [ promise1, promise2, promise3 ];
+
+      RSVP.Promise.all(promises).then(function(array){
+        // Code here never runs because there are rejected promises!
+      }, function(error) {
+        // error.message === "2"
+      });
+      ```
+
+      @method all
+      @for Ember.RSVP.Promise
+      @param {Array} entries array of promises
+      @param {String} label optional string for labeling the promise.
+      Useful for tooling.
+      @return {Promise} promise that is fulfilled when all `promises` have been
+      fulfilled, or rejected if any of them become rejected.
+      @static
+    */
+    __exports__["default"] = function all(entries, label) {
+
+      /*jshint validthis:true */
+      var Constructor = this;
+
+      return new Constructor(function(resolve, reject) {
+        if (!isArray(entries)) {
+          throw new TypeError('You must pass an array to all.');
+        }
+
+        var remaining = entries.length;
+        var results = new Array(remaining);
+        var entry, pending = true;
+
+        if (remaining === 0) {
+          resolve(results);
+          return;
+        }
+
+        function fulfillmentAt(index) {
+          return function(value) {
+            results[index] = value;
+            if (--remaining === 0) {
+              resolve(results);
+            }
+          };
+        }
+
+        function onRejection(reason) {
+          remaining = 0;
+          reject(reason);
+        }
+
+        for (var index = 0; index < entries.length; index++) {
+          entry = entries[index];
+          if (isNonThenable(entry)) {
+            results[index] = entry;
+            if (--remaining === 0) {
+              resolve(results);
+            }
+          } else {
+            Constructor.cast(entry).then(fulfillmentAt(index), onRejection);
+          }
+        }
+      }, label);
+    };
+  });
+define("rsvp/promise/cast", 
+  ["exports"],
+  function(__exports__) {
+    "use strict";
+    /**
+      `RSVP.Promise.cast` coerces its argument to a promise, or returns the
+      argument if it is already a promise which shares a constructor with the caster.
+
+      Example:
+
+      ```javascript
+      var promise = RSVP.Promise.resolve(1);
+      var casted = RSVP.Promise.cast(promise);
+
+      console.log(promise === casted); // true
+      ```
+
+      In the case of a promise whose constructor does not match, it is assimilated.
+      The resulting promise will fulfill or reject based on the outcome of the
+      promise being casted.
+
+      Example:
+
+      ```javascript
+      var thennable = $.getJSON('/api/foo');
+      var casted = RSVP.Promise.cast(thennable);
+
+      console.log(thennable === casted); // false
+      console.log(casted instanceof RSVP.Promise) // true
+
+      casted.then(function(data) {
+        // data is the value getJSON fulfills with
+      });
+      ```
+
+      In the case of a non-promise, a promise which will fulfill with that value is
+      returned.
+
+      Example:
+
+      ```javascript
+      var value = 1; // could be a number, boolean, string, undefined...
+      var casted = RSVP.Promise.cast(value);
+
+      console.log(value === casted); // false
+      console.log(casted instanceof RSVP.Promise) // true
+
+      casted.then(function(val) {
+        val === value // => true
+      });
+      ```
+
+      `RSVP.Promise.cast` is similar to `RSVP.Promise.resolve`, but `RSVP.Promise.cast` differs in the
+      following ways:
+
+      * `RSVP.Promise.cast` serves as a memory-efficient way of getting a promise, when you
+      have something that could either be a promise or a value. RSVP.resolve
+      will have the same effect but will create a new promise wrapper if the
+      argument is a promise.
+      * `RSVP.Promise.cast` is a way of casting incoming thenables or promise subclasses to
+      promises of the exact class specified, so that the resulting object's `then` is
+      ensured to have the behavior of the constructor you are calling cast on (i.e., RSVP.Promise).
+
+      @method cast
+      @param {Object} object to be casted
+      @param {String} label optional string for labeling the promise.
+      Useful for tooling.
+      @return {Promise} promise
+      @static
+    */
+
+    __exports__["default"] = function cast(object, label) {
+      /*jshint validthis:true */
+      var Constructor = this;
+
+      if (object && typeof object === 'object' && object.constructor === Constructor) {
+        return object;
+      }
+
+      return new Constructor(function(resolve) {
+        resolve(object);
+      }, label);
+    };
+  });
+define("rsvp/promise/race", 
+  ["../utils","exports"],
+  function(__dependency1__, __exports__) {
     "use strict";
     /* global toString */
 
-    var Promise = __dependency1__.Promise;
-    var isArray = __dependency2__.isArray;
+    var isArray = __dependency1__.isArray;
+    var isFunction = __dependency1__.isFunction;
+    var isNonThenable = __dependency1__.isNonThenable;
 
     /**
-      `RSVP.race` allows you to watch a series of promises and act as soon as the
-      first promise given to the `promises` argument fulfills or rejects.
+      `RSVP.Promise.race` returns a new promise which is settled in the same way as the
+      first passed promise to settle.
 
       Example:
 
@@ -8987,17 +9846,17 @@ define("rsvp/race",
         }, 100);
       });
 
-      RSVP.race([promise1, promise2]).then(function(result){
+      RSVP.Promise.race([promise1, promise2]).then(function(result){
         // result === "promise 2" because it was resolved before promise1
         // was resolved.
       });
       ```
 
-      `RSVP.race` is deterministic in that only the state of the first completed
-      promise matters. For example, even if other promises given to the `promises`
-      array argument are resolved, but the first completed promise has become
-      rejected before the other promises became fulfilled, the returned promise
-      will become rejected:
+      `RSVP.Promise.race` is deterministic in that only the state of the first
+      settled promise matters. For example, even if other promises given to the
+      `promises` array argument are resolved, but the first settled promise has
+      become rejected before the other promises became fulfilled, the returned
+      promise will become rejected:
 
       ```javascript
       var promise1 = new RSVP.Promise(function(resolve, reject){
@@ -9012,54 +9871,62 @@ define("rsvp/race",
         }, 100);
       });
 
-      RSVP.race([promise1, promise2]).then(function(result){
-        // Code here never runs because there are rejected promises!
+      RSVP.Promise.race([promise1, promise2]).then(function(result){
+        // Code here never runs
       }, function(reason){
         // reason.message === "promise2" because promise 2 became rejected before
         // promise 1 became fulfilled
       });
       ```
 
+      An example real-world use case is implementing timeouts:
+
+      ```javascript
+      RSVP.Promise.race([ajax('foo.json'), timeout(5000)])
+      ```
+
       @method race
-      @for RSVP
       @param {Array} promises array of promises to observe
       @param {String} label optional string for describing the promise returned.
       Useful for tooling.
-      @return {Promise} a promise that becomes fulfilled with the value the first
-      completed promises is resolved with if the first completed promise was
-      fulfilled, or rejected with the reason that the first completed promise
-      was rejected with.
+      @return {Promise} a promise which settles in the same way as the first passed
+      promise to settle.
+      @static
     */
-    function race(promises, label) {
-      if (!isArray(promises)) {
-        throw new TypeError('You must pass an array to race.');
-      }
-      return new Promise(function(resolve, reject) {
-        var results = [], promise;
+    __exports__["default"] = function race(entries, label) {
+      /*jshint validthis:true */
+      var Constructor = this, entry;
 
-        for (var i = 0; i < promises.length; i++) {
-          promise = promises[i];
+      return new Constructor(function(resolve, reject) {
+        if (!isArray(entries)) {
+          throw new TypeError('You must pass an array to race.');
+        }
 
-          if (promise && typeof promise.then === 'function') {
-            promise.then(resolve, reject, "RSVP: RSVP#race");
+        var pending = true;
+
+        function onFulfillment(value) { if (pending) { pending = false; resolve(value); } }
+        function onRejection(reason)  { if (pending) { pending = false; reject(reason); } }
+
+        for (var i = 0; i < entries.length; i++) {
+          entry = entries[i];
+          if (isNonThenable(entry)) {
+            pending = false;
+            resolve(entry);
+            return;
           } else {
-            resolve(promise);
+            Constructor.cast(entry).then(onFulfillment, onRejection);
           }
         }
       }, label);
-    }
-
-    __exports__.race = race;
+    };
   });
-define("rsvp/reject", 
-  ["./promise","exports"],
-  function(__dependency1__, __exports__) {
+define("rsvp/promise/reject", 
+  ["exports"],
+  function(__exports__) {
     "use strict";
-    var Promise = __dependency1__.Promise;
-
     /**
-      `RSVP.reject` returns a promise that will become rejected with the passed
-      `reason`. `RSVP.reject` is essentially shorthand for the following:
+      `RSVP.Promise.reject` returns a promise rejected with the passed `reason`.
+      It is shorthand for the following:
 
       ```javascript
       var promise = new RSVP.Promise(function(resolve, reject){
@@ -9076,7 +9943,7 @@ define("rsvp/reject",
       Instead of writing the above, your code now simply becomes the following:
 
       ```javascript
-      var promise = RSVP.reject(new Error('WHOOPS'));
+      var promise = RSVP.Promise.reject(new Error('WHOOPS'));
 
       promise.then(function(value){
         // Code here doesn't run because the promise is rejected!
@@ -9086,30 +9953,28 @@ define("rsvp/reject",
       ```
 
       @method reject
-      @for RSVP
       @param {Any} reason value that the returned promise will be rejected with.
       @param {String} label optional string for identifying the returned promise.
       Useful for tooling.
-      @return {Promise} a promise that will become rejected with the given
-      `reason`.
+      @return {Promise} a promise rejected with the given `reason`.
+      @static
     */
-    function reject(reason, label) {
-      return new Promise(function (resolve, reject) {
+    __exports__["default"] = function reject(reason, label) {
+      /*jshint validthis:true */
+      var Constructor = this;
+
+      return new Constructor(function (resolve, reject) {
         reject(reason);
       }, label);
-    }
-
-    __exports__.reject = reject;
+    };
   });
-define("rsvp/resolve", 
-  ["./promise","exports"],
-  function(__dependency1__, __exports__) {
+define("rsvp/promise/resolve", 
+  ["exports"],
+  function(__exports__) {
     "use strict";
-    var Promise = __dependency1__.Promise;
-
     /**
-      `RSVP.resolve` returns a promise that will become fulfilled with the passed
-      `value`. `RSVP.resolve` is essentially shorthand for the following:
+      `RSVP.Promise.resolve` returns a promise that will become resolved with the
+      passed `value`. It is shorthand for the following:
 
       ```javascript
       var promise = new RSVP.Promise(function(resolve, reject){
@@ -9124,12 +9989,78 @@ define("rsvp/resolve",
       Instead of writing the above, your code now simply becomes the following:
 
       ```javascript
-      var promise = RSVP.resolve(1);
+      var promise = RSVP.Promise.resolve(1);
 
       promise.then(function(value){
         // value === 1
       });
       ```
+
+      @method resolve
+      @param {Any} value value that the returned promise will be resolved with
+      @param {String} label optional string for identifying the returned promise.
+      Useful for tooling.
+      @return {Promise} a promise that will become fulfilled with the given
+      `value`
+      @static
+    */
+    __exports__["default"] = function resolve(value, label) {
+      /*jshint validthis:true */
+      var Constructor = this;
+
+      return new Constructor(function(resolve, reject) {
+        resolve(value);
+      }, label);
+    };
+  });
+define("rsvp/race", 
+  ["./promise","exports"],
+  function(__dependency1__, __exports__) {
+    "use strict";
+    var Promise = __dependency1__["default"];
+
+    /**
+      This is a convenient alias for `RSVP.Promise.race`.
+
+      @method race
+      @param {Array} array Array of promises.
+      @param {String} label An optional label. This is useful
+      for tooling.
+      @static
+    */
+    __exports__["default"] = function race(array, label) {
+      return Promise.race(array, label);
+    };
+  });
+define("rsvp/reject", 
+  ["./promise","exports"],
+  function(__dependency1__, __exports__) {
+    "use strict";
+    var Promise = __dependency1__["default"];
+
+    /**
+      This is a convenient alias for `RSVP.Promise.reject`.
+
+      @method reject
+      @for RSVP
+      @param {Any} reason value that the returned promise will be rejected with.
+      @param {String} label optional string for identifying the returned promise.
+      Useful for tooling.
+      @return {Promise} a promise rejected with the given `reason`.
+      @static
+    */
+    __exports__["default"] = function reject(reason, label) {
+      return Promise.reject(reason, label);
+    };
+  });
+define("rsvp/resolve", 
+  ["./promise","exports"],
+  function(__dependency1__, __exports__) {
+    "use strict";
+    var Promise = __dependency1__["default"];
+
+    /**
+      This is a convenient alias for `RSVP.Promise.resolve`.
 
       @method resolve
       @for RSVP
@@ -9138,21 +10069,16 @@ define("rsvp/resolve",
       Useful for tooling.
       @return {Promise} a promise that will become fulfilled with the given
       `value`
+      @static
     */
-    function resolve(value, label) {
-      return new Promise(function(resolve, reject) {
-        resolve(value);
-      }, label);
-    }
-
-    __exports__.resolve = resolve;
+    __exports__["default"] = function resolve(value, label) {
+      return Promise.resolve(value, label);
+    };
   });
 define("rsvp/rethrow", 
   ["exports"],
   function(__exports__) {
     "use strict";
-    var local = (typeof global === "undefined") ? this : global;
-
     /**
       `RSVP.rethrow` will rethrow an error on the next turn of the JavaScript event
       loop in order to aid debugging.
@@ -9162,8 +10088,8 @@ define("rsvp/rethrow",
       this reason, it is recommended that you always specify a second rejection
       handler function to `then`. However, `RSVP.rethrow` will throw the exception
       outside of the promise, so it bubbles up to your console if in the browser,
-      or domain/cause uncaught exception in Node. `rethrow` will throw the error
-      again so the error can be handled by the promise.
+      or domain/cause uncaught exception in Node. `rethrow` will also throw the
+      error again so the error can be handled by the promise per the spec.
 
       ```javascript
       function throws(){
@@ -9174,7 +10100,7 @@ define("rsvp/rethrow",
         throws();
       });
 
-      promise.fail(RSVP.rethrow).then(function(){
+      promise.catch(RSVP.rethrow).then(function(){
         // Code here doesn't run because the promise became rejected due to an
         // error!
       }, function (err){
@@ -9184,64 +10110,75 @@ define("rsvp/rethrow",
 
       The 'Whoops' error will be thrown on the next turn of the event loop
       and you can watch for it in your console. You can also handle it using a
-      rejection handler given to `.then` or `.fail` on the returned promise.
+      rejection handler given to `.then` or `.catch` on the returned promise.
 
       @method rethrow
       @for RSVP
       @param {Error} reason reason the promise became rejected.
       @throws Error
+      @static
     */
-    function rethrow(reason) {
-      local.setTimeout(function() {
+    __exports__["default"] = function rethrow(reason) {
+      setTimeout(function() {
         throw reason;
       });
       throw reason;
-    }
-
-    __exports__.rethrow = rethrow;
+    };
   });
 define("rsvp/utils", 
   ["exports"],
   function(__exports__) {
     "use strict";
     function objectOrFunction(x) {
-      return isFunction(x) || (typeof x === "object" && x !== null);
+      return typeof x === "function" || (typeof x === "object" && x !== null);
     }
 
-    function isFunction(x) {
+    __exports__.objectOrFunction = objectOrFunction;function isFunction(x) {
       return typeof x === "function";
     }
 
-    function isArray(x) {
+    __exports__.isFunction = isFunction;function isNonThenable(x) {
+      return !objectOrFunction(x);
+    }
+
+    __exports__.isNonThenable = isNonThenable;function isArray(x) {
       return Object.prototype.toString.call(x) === "[object Array]";
     }
 
-    // Date.now is not available in browsers < IE9
+    __exports__.isArray = isArray;// Date.now is not available in browsers < IE9
     // https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Date/now#Compatibility
     var now = Date.now || function() { return new Date().getTime(); };
-
-
-    __exports__.objectOrFunction = objectOrFunction;
-    __exports__.isFunction = isFunction;
-    __exports__.isArray = isArray;
     __exports__.now = now;
+    var keysOf = Object.keys || function(object) {
+      var result = [];
+
+      for (var prop in object) {
+        result.push(prop);
+      }
+
+      return result;
+    };
+    __exports__.keysOf = keysOf;
   });
 define("rsvp", 
-  ["./rsvp/events","./rsvp/promise","./rsvp/node","./rsvp/all","./rsvp/race","./rsvp/hash","./rsvp/rethrow","./rsvp/defer","./rsvp/config","./rsvp/resolve","./rsvp/reject", "exports"],
-  function(__dependency1__, __dependency2__, __dependency3__, __dependency4__, __dependency5__, __dependency6__, __dependency7__, __dependency8__, __dependency9__, __dependency10__, __dependency11__, __exports__) {
+  ["./rsvp/promise","./rsvp/events","./rsvp/node","./rsvp/all","./rsvp/all_settled","./rsvp/race","./rsvp/hash","./rsvp/rethrow","./rsvp/defer","./rsvp/config","./rsvp/map","./rsvp/resolve","./rsvp/reject","./rsvp/filter","exports"],
+  function(__dependency1__, __dependency2__, __dependency3__, __dependency4__, __dependency5__, __dependency6__, __dependency7__, __dependency8__, __dependency9__, __dependency10__, __dependency11__, __dependency12__, __dependency13__, __dependency14__, __exports__) {
     "use strict";
-    var EventTarget = __dependency1__.EventTarget;
-    var Promise = __dependency2__.Promise;
-    var denodeify = __dependency3__.denodeify;
-    var all = __dependency4__.all;
-    var race = __dependency5__.race;
-    var hash = __dependency6__.hash;
-    var rethrow = __dependency7__.rethrow;
-    var defer = __dependency8__.defer;
-    var config = __dependency9__.config;
-    var configure = __dependency9__.configure;
-    var resolve = __dependency10__.resolve;
-    var reject = __dependency11__.reject;
+    var Promise = __dependency1__["default"];
+    var EventTarget = __dependency2__["default"];
+    var denodeify = __dependency3__["default"];
+    var all = __dependency4__["default"];
+    var allSettled = __dependency5__["default"];
+    var race = __dependency6__["default"];
+    var hash = __dependency7__["default"];
+    var rethrow = __dependency8__["default"];
+    var defer = __dependency9__["default"];
+    var config = __dependency10__.config;
+    var configure = __dependency10__.configure;
+    var map = __dependency11__["default"];
+    var resolve = __dependency12__["default"];
+    var reject = __dependency13__["default"];
+    var filter = __dependency14__["default"];
 
     function async(callback, arg) {
       config.async(callback, arg);
@@ -9255,9 +10192,21 @@ define("rsvp",
       config.off.apply(config, arguments);
     }
 
+    // Set up instrumentation through `window.__PROMISE_INTRUMENTATION__`
+    if (typeof window !== 'undefined' && typeof window.__PROMISE_INSTRUMENTATION__ === 'object') {
+      var callbacks = window.__PROMISE_INSTRUMENTATION__;
+      configure('instrument', true);
+      for (var eventName in callbacks) {
+        if (callbacks.hasOwnProperty(eventName)) {
+          on(eventName, callbacks[eventName]);
+        }
+      }
+    }
+
     __exports__.Promise = Promise;
     __exports__.EventTarget = EventTarget;
     __exports__.all = all;
+    __exports__.allSettled = allSettled;
     __exports__.race = race;
     __exports__.hash = hash;
     __exports__.rethrow = rethrow;
@@ -9269,6 +10218,8 @@ define("rsvp",
     __exports__.resolve = resolve;
     __exports__.reject = reject;
     __exports__.async = async;
+    __exports__.map = map;
+    __exports__.filter = filter;
   });
 
 })();
@@ -14482,9 +15433,7 @@ function ReduceComputedProperty(options) {
 
     meta.dependentArraysObserver.suspendArrayObservers(function () {
       forEach(cp._dependentKeys, function (dependentKey) {
-        
-          if (!partiallyRecomputeFor(this, dependentKey)) { return; }
-        
+        if (!partiallyRecomputeFor(this, dependentKey)) { return; }
 
         var dependentArray = get(this, dependentKey),
             previousDependentArray = meta.dependentArrays[dependentKey];
@@ -14513,9 +15462,7 @@ function ReduceComputedProperty(options) {
     }, this);
 
     forEach(cp._dependentKeys, function(dependentKey) {
-      
-        if (!partiallyRecomputeFor(this, dependentKey)) { return; }
-      
+      if (!partiallyRecomputeFor(this, dependentKey)) { return; }
 
       var dependentArray = get(this, dependentKey);
       if (dependentArray) {
@@ -14523,6 +15470,7 @@ function ReduceComputedProperty(options) {
       }
     }, this);
   };
+
 
   this.func = function (propertyName) {
     
@@ -17041,17 +17989,17 @@ Ember.ActionHandler = Ember.Mixin.create({
   mergedProperties: ['_actions'],
 
   /**
-    The collection of functions, keyed by name, available on this route as
-    action targets.
+    The collection of functions, keyed by name, available on this
+    `ActionHandler` as action targets.
 
     These functions will be invoked when a matching `{{action}}` is triggered
     from within a template and the application's current route is this route.
 
-    Actions can also be invoked from other parts of your application via `Route#send`
-    or `Controller#send`.
+    Actions can also be invoked from other parts of your application
+    via `ActionHandler#send`.
 
     The `actions` hash will inherit action handlers from
-    the `actions` hash defined on extended Route parent classes
+    the `actions` hash defined on extended parent classes
     or mixins rather than just replace the entire hash, e.g.:
 
     ```js
@@ -17078,8 +18026,9 @@ Ember.ActionHandler = Ember.Mixin.create({
     this.send('playMusic');
     ```
 
-    Within a route's action handler, the value of the `this` context
-    is the Route object:
+    Within a Controller, Route, View or Component's action handler,
+    the value of the `this` context is the Controller, Route, View or
+    Component object:
 
     ```js
     App.SongRoute = Ember.Route.extend({
@@ -17154,98 +18103,6 @@ Ember.ActionHandler = Ember.Mixin.create({
     });
     ```
 
-    ## Built-in actions
-
-    There are a few built-in actions pertaining to transitions that you
-    can use to customize transition behavior: `willTransition` and
-    `error`.
-
-    ### `willTransition`
-
-    The `willTransition` action is fired at the beginning of any
-    attempted transition with a `Transition` object as the sole
-    argument. This action can be used for aborting, redirecting,
-    or decorating the transition from the currently active routes.
-
-    A good example is preventing navigation when a form is
-    half-filled out:
-
-    ```js
-    App.ContactFormRoute = Ember.Route.extend({
-      actions: {
-        willTransition: function(transition) {
-          if (this.controller.get('userHasEnteredData')) {
-            this.controller.displayNavigationConfirm();
-            transition.abort();
-          }
-        }
-      }
-    });
-    ```
-
-    You can also redirect elsewhere by calling
-    `this.transitionTo('elsewhere')` from within `willTransition`.
-    Note that `willTransition` will not be fired for the
-    redirecting `transitionTo`, since `willTransition` doesn't
-    fire when there is already a transition underway. If you want
-    subsequent `willTransition` actions to fire for the redirecting
-    transition, you must first explicitly call
-    `transition.abort()`.
-
-    ### `error`
-
-    When attempting to transition into a route, any of the hooks
-    may return a promise that rejects, at which point an `error`
-    action will be fired on the partially-entered routes, allowing
-    for per-route error handling logic, or shared error handling
-    logic defined on a parent route.
-
-    Here is an example of an error handler that will be invoked
-    for rejected promises from the various hooks on the route,
-    as well as any unhandled errors from child routes:
-
-    ```js
-    App.AdminRoute = Ember.Route.extend({
-      beforeModel: function() {
-        return Ember.RSVP.reject("bad things!");
-      },
-
-      actions: {
-        error: function(error, transition) {
-          // Assuming we got here due to the error in `beforeModel`,
-          // we can expect that error === "bad things!",
-          // but a promise model rejecting would also
-          // call this hook, as would any errors encountered
-          // in `afterModel`.
-
-          // The `error` hook is also provided the failed
-          // `transition`, which can be stored and later
-          // `.retry()`d if desired.
-
-          this.transitionTo('login');
-        }
-      }
-    });
-    ```
-
-    `error` actions that bubble up all the way to `ApplicationRoute`
-    will fire a default error handler that logs the error. You can
-    specify your own global default error handler by overriding the
-    `error` handler on `ApplicationRoute`:
-
-    ```js
-    App.ApplicationRoute = Ember.Route.extend({
-      actions: {
-        error: function(error, transition) {
-          this.controllerFor('banner').displayError(error.message);
-        }
-      }
-    });
-    ```
-
-    @see {Ember.Route#send}
-    @see {Handlebars.helpers.action}
-
     @property actions
     @type Hash
     @default null
@@ -17287,8 +18144,8 @@ Ember.ActionHandler = Ember.Mixin.create({
       } else {
         return;
       }
-    } else if (this.deprecatedSend && this.deprecatedSendHandles && this.deprecatedSendHandles(actionName)) {
-      if (this.deprecatedSend.apply(this, [].slice.call(arguments)) === true) {
+    } else if (!Ember.FEATURES.isEnabled('ember-routing-drop-deprecated-action-style') && this.deprecatedSend && this.deprecatedSendHandles && this.deprecatedSendHandles(actionName)) {
+            if (this.deprecatedSend.apply(this, [].slice.call(arguments)) === true) {
         // handler return true, so this action will bubble
       } else {
         return;
@@ -24625,6 +25482,69 @@ Ember.CollectionView.CONTAINER_MAP = {
 
 
 (function() {
+/**
+  The ComponentTemplateDeprecation mixin is used to provide a useful
+  deprecation warning when using either `template` or `templateName` with
+  a component. The `template` and `templateName` properties specified at
+  extend time are moved to `layout` and `layoutName` respectively.
+
+  `Ember.ComponentTemplateDeprecation` is used internally by Ember in
+  `Ember.Component`.
+
+  @class ComponentTemplateDeprecation
+  @namespace Ember
+*/
+Ember.ComponentTemplateDeprecation = Ember.Mixin.create({
+  /**
+    @private
+
+    Moves `templateName` to `layoutName` and `template` to `layout` at extend
+    time if a layout is not also specified.
+
+    Note that this currently modifies the mixin themselves, which is technically
+    dubious but is practically of little consequence. This may change in the
+    future.
+
+    @method willMergeMixin
+  */
+  willMergeMixin: function(props) {
+    // must call _super here to ensure that the ActionHandler
+    // mixin is setup properly (moves actions -> _actions)
+    //
+    // Calling super is only OK here since we KNOW that
+    // there is another Mixin loaded first.
+    this._super.apply(this, arguments);
+
+    var deprecatedProperty, replacementProperty,
+        layoutSpecified = (props.layoutName || props.layout);
+
+    if (props.templateName && !layoutSpecified) {
+      deprecatedProperty = 'templateName';
+      replacementProperty = 'layoutName';
+
+      props.layoutName = props.templateName;
+      delete props['templateName'];
+    }
+
+    if (props.template && !layoutSpecified) {
+      deprecatedProperty = 'template';
+      replacementProperty = 'layout';
+
+      props.layout = props.template;
+      delete props['template'];
+    }
+
+    if (deprecatedProperty) {
+          }
+  }
+});
+
+
+})();
+
+
+
+(function() {
 var get = Ember.get, set = Ember.set, isNone = Ember.isNone,
     a_slice = Array.prototype.slice;
 
@@ -24719,7 +25639,7 @@ var get = Ember.get, set = Ember.set, isNone = Ember.isNone,
   @namespace Ember
   @extends Ember.View
 */
-Ember.Component = Ember.View.extend(Ember.TargetActionSupport, {
+Ember.Component = Ember.View.extend(Ember.TargetActionSupport, Ember.ComponentTemplateDeprecation, {
   init: function() {
     this._super();
     set(this, 'context', this);
@@ -24730,6 +25650,44 @@ Ember.Component = Ember.View.extend(Ember.TargetActionSupport, {
     options.data = {view: options._context};
     Ember.Handlebars.helpers['yield'].apply(this, [options]);
   },
+
+  /**
+  A components template property is set by passing a block
+  during its invocation. It is executed within the parent context.
+
+  Example:
+
+  ```handlebars
+  {{#my-component}}
+    // something that is run in the context
+    // of the parent context
+  {{/my-component}}
+  ```
+
+  Specifying a template directly to a component is deprecated without
+  also specifying the layout property.
+
+  @deprecated
+  @property template
+  */
+  template: Ember.computed(function(key, value) {
+    if (value !== undefined) { return value; }
+
+    var templateName = get(this, 'templateName'),
+        template = this.templateForName(templateName, 'template');
+
+    
+    return template || get(this, 'defaultTemplate');
+  }).property('templateName'),
+
+  /**
+  Specifying a components `templateName` is deprecated without also
+  providing the `layout` or `layoutName` properties.
+
+  @deprecated
+  @property templateName
+  */
+  templateName: null,
 
   // during render, isolate keywords
   cloneKeywords: function() {
@@ -26719,10 +27677,10 @@ Ember._HandlebarsBoundView = Ember._MetamorphView.extend({
         preserveContext = get(this, 'preserveContext'),
         context = get(this, 'previousContext');
 
-    var contextController;
+    var _contextController;
 
     
-      contextController = get(this, 'contextController');
+      _contextController = get(this, '_contextController');
     
 
     var inverseTemplate = get(this, 'inverseTemplate'),
@@ -26745,9 +27703,9 @@ Ember._HandlebarsBoundView = Ember._MetamorphView.extend({
       // If so, pass the specified object to the template
         if (displayTemplate) {
           
-            if (contextController) {
-              set(contextController, 'content', result);
-              result = contextController;
+            if (_contextController) {
+              set(_contextController, 'content', result);
+              result = _contextController;
             }
           
           set(this, '_context', result);
@@ -26852,8 +27810,10 @@ function bind(property, options, preserveContext, shouldDisplay, valueNormalizer
 
       
         if (options.hash.controller) {
-          bindView.set('contextController', this.container.lookupFactory('controller:'+options.hash.controller).create({
-            container: currentContext
+          bindView.set('_contextController', this.container.lookupFactory('controller:'+options.hash.controller).create({
+            container: currentContext.container,
+            parentController: currentContext,
+            target: currentContext
           }));
         }
       
@@ -27084,6 +28044,56 @@ EmberHandlebars.registerHelper('unboundIf', function unboundIfHelper(property, f
 });
 
 /**
+  Use the `{{with}}` helper when you want to scope context. Take the following code as an example:
+
+  ```handlebars
+  <h5>{{user.name}}</h5>
+
+  <div class="role">
+    <h6>{{user.role.label}}</h6>
+    <span class="role-id">{{user.role.id}}</span>
+
+    <p class="role-desc">{{user.role.description}}</p>
+  </div>
+  ```
+
+  `{{with}}` can be our best friend in these cases, 
+  instead of writing `user.role.*` over and over, we use `{{#with user.role}}`.
+  Now the context within the `{{#with}} .. {{/with}}` block is `user.role` so you can do the following:
+
+  ```handlebars
+  <h5>{{user.name}}</h5>
+
+  <div class="role">
+    {{#with user.role}}
+      <h6>{{label}}</h6>
+      <span class="role-id">{{id}}</span>
+
+      <p class="role-desc">{{description}}</p>
+    {{/with}}
+  </div>
+  ```
+
+  ### `as` operator
+
+  This operator aliases the scope to a new name. It's helpful for semantic clarity and to retain 
+  default scope or to reference from another `{{with}}` block.
+
+  ```handlebars
+  // posts might not be
+  {{#with user.posts as blogPosts}}
+    <div class="notice">
+      There are {{blogPosts.length}} blog posts written by {{user.name}}.
+    </div>
+
+    {{#each post in blogPosts}}
+      <li>{{post.title}}</li>
+    {{/each}}
+  {{/with}}
+  ```
+
+  Without the `as` operator, it would be impossible to reference `user.name` in the example above.
+
   @method with
   @for Ember.Handlebars.helpers
   @param {Function} context
@@ -28019,11 +29029,20 @@ Ember.Handlebars.registerHelper('collection', function collectionHelper(path, op
   var inverse = options.inverse;
   var view = options.data.view;
 
+
+  var controller, container;
   // If passed a path string, convert that into an object.
   // Otherwise, just default to the standard class.
   var collectionClass;
-  collectionClass = path ? handlebarsGet(this, path, options) : Ember.CollectionView;
-  
+  if (path) {
+    controller = data.keywords.controller;
+    container = controller && controller.container;
+    collectionClass = handlebarsGet(this, path, options) || container.lookupFactory('view:' + path); 
+      }
+  else {
+    collectionClass = Ember.CollectionView;
+  }
+
   var hash = options.hash, itemHash = {}, match;
 
   // Extract item view class if provided else default to the standard class
@@ -28031,9 +29050,9 @@ Ember.Handlebars.registerHelper('collection', function collectionHelper(path, op
       itemViewClass;
 
   if (hash.itemView) {
-    var controller = data.keywords.controller;
-        var container = controller.container;
-    itemViewClass = container.resolve('view:' + hash.itemView);
+    controller = data.keywords.controller;
+        container = controller.container;
+    itemViewClass = container.lookupFactory('view:' + hash.itemView);
       } else if (hash.itemViewClass) {
     itemViewClass = handlebarsGet(collectionPrototype, hash.itemViewClass, options);
   } else {
@@ -30851,10 +31870,18 @@ define("route-recognizer",
               continue;
             }
             var pair = key;
-            if(value !== true) {
-              pair += "=" + encodeURIComponent(value);
+            if (Array.isArray(value)) {
+              for (var i = 0, l = value.length; i < l; i++) {
+                var arrayPair = key + '[]' + '=' + encodeURIComponent(value[i]);
+                pairs.push(arrayPair);
+              }
             }
-            pairs.push(pair);
+            else if (value !== true) {
+              pair += "=" + encodeURIComponent(value);
+              pairs.push(pair);
+            } else {
+              pairs.push(pair);
+            }
           }
         }
 
@@ -30868,8 +31895,28 @@ define("route-recognizer",
         for(var i=0; i < pairs.length; i++) {
           var pair      = pairs[i].split('='),
               key       = decodeURIComponent(pair[0]),
-              value     = pair[1] ? decodeURIComponent(pair[1]) : true;
-          queryParams[key] = value;
+              keyLength = key.length,
+              isArray = false,
+              value;
+          if (pair.length === 1) {
+            value = true;
+          } else {
+            //Handle arrays
+            if (keyLength > 2 && key.slice(keyLength -2) === '[]') {
+              isArray = true;
+              key = key.slice(0, keyLength - 2);
+              if(!queryParams[key]) {
+                queryParams[key] = [];
+              }
+            }
+            value = pair[1] ? decodeURIComponent(pair[1]) : '';
+          }
+          if (isArray) {
+            queryParams[key].push(value);
+          } else {
+            queryParams[key] = value;
+          }
+          
         }
         return queryParams;
       },
@@ -31024,8 +32071,7 @@ define("route-recognizer",
 
 
 (function() {
-/*jslint es5: true */
-define("router/handler-info",
+define("router/handler-info", 
   ["./utils","rsvp","exports"],
   function(__dependency1__, __dependency2__, __exports__) {
     "use strict";
@@ -31229,11 +32275,11 @@ define("router/handler-info",
     __exports__.UnresolvedHandlerInfoByParam = UnresolvedHandlerInfoByParam;
     __exports__.UnresolvedHandlerInfoByObject = UnresolvedHandlerInfoByObject;
   });
-define("router/router",
-  ["route-recognizer","rsvp","./utils","./transition-state","./transition","./transition-intent/named-transition-intent","./transition-intent/url-transition-intent","./transition-intent/refresh-transition-intent","exports"],
-  function(__dependency1__, __dependency2__, __dependency3__, __dependency4__, __dependency5__, __dependency6__, __dependency7__, __dependency8__, __exports__) {
+define("router/router", 
+  ["route-recognizer","rsvp","./utils","./transition-state","./transition","./transition-intent/named-transition-intent","./transition-intent/url-transition-intent","exports"],
+  function(__dependency1__, __dependency2__, __dependency3__, __dependency4__, __dependency5__, __dependency6__, __dependency7__, __exports__) {
     "use strict";
-    var RouteRecognizer = __dependency1__['default'];
+    var RouteRecognizer = __dependency1__["default"];
     var resolve = __dependency2__.resolve;
     var reject = __dependency2__.reject;
     var async = __dependency2__.async;
@@ -31252,7 +32298,6 @@ define("router/router",
     var TransitionAborted = __dependency5__.TransitionAborted;
     var NamedTransitionIntent = __dependency6__.NamedTransitionIntent;
     var URLTransitionIntent = __dependency7__.URLTransitionIntent;
-    var RefreshTransitionIntent = __dependency8__.RefreshTransitionIntent;
 
     var pop = Array.prototype.pop;
 
@@ -31454,9 +32499,22 @@ define("router/router",
       },
 
       refresh: function(pivotHandler) {
-        var intent = new RefreshTransitionIntent({
-          pivotHandler: pivotHandler || this.state.handlerInfos[0].handler,
-          queryParams: this._changedQueryParams
+
+
+        var state = this.activeTransition ? this.activeTransition.state : this.state;
+        var handlerInfos = state.handlerInfos;
+        var params = {};
+        for (var i = 0, len = handlerInfos.length; i < len; ++i) {
+          var handlerInfo = handlerInfos[i];
+          params[handlerInfo.name] = handlerInfo.params || {};
+        }
+
+        log(this, "Starting a refresh transition");
+        var intent = new NamedTransitionIntent({
+          name: handlerInfos[handlerInfos.length - 1].name,
+          pivotHandler: pivotHandler || handlerInfos[0].handler,
+          contexts: [], // TODO collect contexts...?
+          queryParams: this._changedQueryParams || state.queryParams || {}
         });
 
         return this.transitionByIntent(intent, false);
@@ -31512,8 +32570,7 @@ define("router/router",
         var partitionedArgs   = extractQueryParams(slice.call(arguments, 1)),
             contexts          = partitionedArgs[0],
             queryParams       = partitionedArgs[1],
-            activeQueryParams  = {},
-            effectiveQueryParams = {};
+            activeQueryParams  = this.state.queryParams;
 
         var targetHandlerInfos = this.state.handlerInfos,
             found = false, names, object, handlerInfo, handlerObj, i, len;
@@ -31545,7 +32602,8 @@ define("router/router",
 
         var newState = intent.applyToHandlers(state, recogHandlers, this.getHandler, targetHandler, true, true);
 
-        return handlerInfosEqual(newState.handlerInfos, state.handlerInfos);
+        return handlerInfosEqual(newState.handlerInfos, state.handlerInfos) && 
+               !getChangelist(activeQueryParams, queryParams);
       },
 
       trigger: function(name) {
@@ -31935,7 +32993,7 @@ define("router/router",
 
     __exports__.Router = Router;
   });
-define("router/transition-intent",
+define("router/transition-intent", 
   ["./utils","exports"],
   function(__dependency1__, __exports__) {
     "use strict";
@@ -31955,7 +33013,7 @@ define("router/transition-intent",
 
     __exports__.TransitionIntent = TransitionIntent;
   });
-define("router/transition-intent/named-transition-intent",
+define("router/transition-intent/named-transition-intent", 
   ["../transition-intent","../transition-state","../handler-info","../utils","exports"],
   function(__dependency1__, __dependency2__, __dependency3__, __dependency4__, __exports__) {
     "use strict";
@@ -31980,7 +33038,6 @@ define("router/transition-intent/named-transition-intent",
         pureArgs              = partitionedArgs[0],
         queryParams           = partitionedArgs[1],
         handlers              = recognizer.handlersFor(pureArgs[0]);
-        //handlerInfos          = generateHandlerInfosWithQueryParams({}, handlers, queryParams);
 
       var targetRouteName = handlers[handlers.length-1].handler;
 
@@ -31989,13 +33046,26 @@ define("router/transition-intent/named-transition-intent",
 
     NamedTransitionIntent.prototype.applyToHandlers = function(oldState, handlers, getHandler, targetRouteName, isIntermediate, checkingIfActive) {
 
+      var i;
       var newState = new TransitionState();
       var objects = this.contexts.slice(0);
 
       var invalidateIndex = handlers.length;
       var nonDynamicIndexes = [];
 
-      for (var i = handlers.length - 1; i >= 0; --i) {
+      // Pivot handlers are provided for refresh transitions
+      if (this.pivotHandler) {
+        for (i = 0; i < handlers.length; ++i) {
+          if (getHandler(handlers[i].handler) === this.pivotHandler) {
+            invalidateIndex = i;
+            break;
+          }
+        }
+      }
+
+      var pivotHandlerFound = !this.pivotHandler;
+
+      for (i = handlers.length - 1; i >= 0; --i) {
         var result = handlers[i];
         var name = result.handler;
         var handler = getHandler(name);
@@ -32004,7 +33074,11 @@ define("router/transition-intent/named-transition-intent",
         var newHandlerInfo = null;
 
         if (result.names.length > 0) {
-          newHandlerInfo = this.getHandlerInfoForDynamicSegment(name, handler, result.names, objects, oldHandlerInfo, targetRouteName);
+          if (i >= invalidateIndex) {
+            newHandlerInfo = this.createParamHandlerInfo(name, handler, result.names, objects, oldHandlerInfo);
+          } else {
+            newHandlerInfo = this.getHandlerInfoForDynamicSegment(name, handler, result.names, objects, oldHandlerInfo, targetRouteName);
+          }
         } else {
           // This route has no dynamic segment.
           // Therefore treat as a param-based handlerInfo
@@ -32030,8 +33104,8 @@ define("router/transition-intent/named-transition-intent",
         }
 
         var handlerToUse = oldHandlerInfo;
-        if (newHandlerInfo.shouldSupercede(oldHandlerInfo)) {
-          invalidateIndex = i;
+        if (i >= invalidateIndex || newHandlerInfo.shouldSupercede(oldHandlerInfo)) {
+          invalidateIndex = Math.min(i, invalidateIndex);
           handlerToUse = newHandlerInfo;
         }
 
@@ -32139,56 +33213,7 @@ define("router/transition-intent/named-transition-intent",
 
     __exports__.NamedTransitionIntent = NamedTransitionIntent;
   });
-define("router/transition-intent/refresh-transition-intent",
-  ["../transition-intent","../transition-state","../handler-info","../utils","exports"],
-  function(__dependency1__, __dependency2__, __dependency3__, __dependency4__, __exports__) {
-    "use strict";
-    var TransitionIntent = __dependency1__.TransitionIntent;
-    var TransitionState = __dependency2__.TransitionState;
-    var UnresolvedHandlerInfoByParam = __dependency3__.UnresolvedHandlerInfoByParam;
-    var extractQueryParams = __dependency4__.extractQueryParams;
-    var oCreate = __dependency4__.oCreate;
-    var merge = __dependency4__.merge;
-
-    function RefreshTransitionIntent(props) {
-      TransitionIntent.call(this, props);
-    }
-
-    RefreshTransitionIntent.prototype = oCreate(TransitionIntent.prototype);
-    RefreshTransitionIntent.prototype.applyToState = function(oldState, recognizer, getHandler, isIntermediate) {
-
-      var pivotHandlerFound = false;
-      var newState = new TransitionState();
-
-      var oldHandlerInfos = oldState.handlerInfos;
-      for (var i = 0, len = oldHandlerInfos.length; i < len; ++i) {
-        var handlerInfo = oldHandlerInfos[i];
-        if (handlerInfo.handler === this.pivotHandler) {
-          pivotHandlerFound = true;
-        }
-
-        if (pivotHandlerFound) {
-          newState.handlerInfos.push(new UnresolvedHandlerInfoByParam({
-            name: handlerInfo.name,
-            handler: handlerInfo.handler,
-            params: handlerInfo.params || {}
-          }));
-        } else {
-          newState.handlerInfos.push(handlerInfo);
-        }
-      }
-
-      merge(newState.queryParams, oldState.queryParams);
-      if (this.queryParams) {
-        merge(newState.queryParams, this.queryParams);
-      }
-
-      return newState;
-    };
-
-    __exports__.RefreshTransitionIntent = RefreshTransitionIntent;
-  });
-define("router/transition-intent/url-transition-intent",
+define("router/transition-intent/url-transition-intent", 
   ["../transition-intent","../transition-state","../handler-info","../utils","exports"],
   function(__dependency1__, __dependency2__, __dependency3__, __dependency4__, __exports__) {
     "use strict";
@@ -32256,7 +33281,7 @@ define("router/transition-intent/url-transition-intent",
 
     __exports__.URLTransitionIntent = URLTransitionIntent;
   });
-define("router/transition-state",
+define("router/transition-state", 
   ["./handler-info","./utils","rsvp","exports"],
   function(__dependency1__, __dependency2__, __dependency3__, __exports__) {
     "use strict";
@@ -32291,10 +33316,10 @@ define("router/transition-state",
         var wasAborted = false;
 
         // The prelude RSVP.resolve() asyncs us into the promise land.
-        return resolve().then(resolveOneHandlerInfo).catch(handleError);
+        return resolve().then(resolveOneHandlerInfo)['catch'](handleError);
 
         function innerShouldContinue() {
-          return resolve(shouldContinue()).catch(function(reason) {
+          return resolve(shouldContinue())['catch'](function(reason) {
             // We distinguish between errors that occurred
             // during resolution (e.g. beforeModel/model/afterModel),
             // and aborts due to a rejecting promise from shouldContinue().
@@ -32366,7 +33391,7 @@ define("router/transition-state",
 
     __exports__.TransitionState = TransitionState;
   });
-define("router/transition",
+define("router/transition", 
   ["rsvp","./handler-info","./utils","exports"],
   function(__dependency1__, __dependency2__, __dependency3__, __exports__) {
     "use strict";
@@ -32418,7 +33443,7 @@ define("router/transition",
         }
 
         this.sequence = Transition.currentSequence++;
-        this.promise = state.resolve(router.async, checkForAbort, this).catch(function(result) {
+        this.promise = state.resolve(router.async, checkForAbort, this)['catch'](function(result) {
           if (result.wasAborted) {
             throw logAbort(transition);
           } else {
@@ -32582,7 +33607,7 @@ define("router/transition",
        */
       followRedirects: function() {
         var router = this.router;
-        return this.promise.catch(function(reason) {
+        return this.promise['catch'](function(reason) {
           if (router.activeTransition) {
             return router.activeTransition.followRedirects();
           }
@@ -32624,7 +33649,7 @@ define("router/transition",
     __exports__.logAbort = logAbort;
     __exports__.TransitionAborted = TransitionAborted;
   });
-define("router/utils",
+define("router/utils", 
   ["exports"],
   function(__exports__) {
     "use strict";
@@ -32808,7 +33833,7 @@ define("router/utils",
     __exports__.serialize = serialize;
     __exports__.getChangelist = getChangelist;
   });
-define("router",
+define("router", 
   ["./router/router","exports"],
   function(__dependency1__, __exports__) {
     "use strict";
@@ -32816,7 +33841,6 @@ define("router",
 
     __exports__.Router = Router;
   });
-
 })();
 
 
@@ -33770,6 +34794,213 @@ Ember.Route = Ember.Object.extend(Ember.ActionHandler, {
     this.activate();
   },
 
+  /**
+    The collection of functions, keyed by name, available on this route as
+    action targets.
+
+    These functions will be invoked when a matching `{{action}}` is triggered
+    from within a template and the application's current route is this route.
+
+    Actions can also be invoked from other parts of your application via `Route#send`
+    or `Controller#send`.
+
+    The `actions` hash will inherit action handlers from
+    the `actions` hash defined on extended Route parent classes
+    or mixins rather than just replace the entire hash, e.g.:
+
+    ```js
+    App.CanDisplayBanner = Ember.Mixin.create({
+      actions: {
+        displayBanner: function(msg) {
+          // ...
+        }
+      }
+    });
+
+    App.WelcomeRoute = Ember.Route.extend(App.CanDisplayBanner, {
+      actions: {
+        playMusic: function() {
+          // ...
+        }
+      }
+    });
+
+    // `WelcomeRoute`, when active, will be able to respond
+    // to both actions, since the actions hash is merged rather
+    // then replaced when extending mixins / parent classes.
+    this.send('displayBanner');
+    this.send('playMusic');
+    ```
+
+    Within a route's action handler, the value of the `this` context
+    is the Route object:
+
+    ```js
+    App.SongRoute = Ember.Route.extend({
+      actions: {
+        myAction: function() {
+          this.controllerFor("song");
+          this.transitionTo("other.route");
+          ...
+        }
+      }
+    });
+    ```
+
+    It is also possible to call `this._super()` from within an
+    action handler if it overrides a handler defined on a parent
+    class or mixin:
+
+    Take for example the following routes:
+
+    ```js
+    App.DebugRoute = Ember.Mixin.create({
+      actions: {
+        debugRouteInformation: function() {
+          console.debug("trololo");
+        }
+      }
+    });
+
+    App.AnnoyingDebugRoute = Ember.Route.extend(App.DebugRoute, {
+      actions: {
+        debugRouteInformation: function() {
+          // also call the debugRouteInformation of mixed in App.DebugRoute
+          this._super();
+
+          // show additional annoyance
+          window.alert(...);
+        }
+      }
+    });
+    ```
+
+    ## Bubbling
+
+    By default, an action will stop bubbling once a handler defined
+    on the `actions` hash handles it. To continue bubbling the action,
+    you must return `true` from the handler:
+
+    ```js
+    App.Router.map(function() {
+      this.resource("album", function() {
+        this.route("song");
+      });
+    });
+
+    App.AlbumRoute = Ember.Route.extend({
+      actions: {
+        startPlaying: function() {
+        }
+      }
+    });
+
+    App.AlbumSongRoute = Ember.Route.extend({
+      actions: {
+        startPlaying: function() {
+          // ...
+
+          if (actionShouldAlsoBeTriggeredOnParentRoute) {
+            return true;
+          }
+        }
+      }
+    });
+    ```
+
+    ## Built-in actions
+
+    There are a few built-in actions pertaining to transitions that you
+    can use to customize transition behavior: `willTransition` and
+    `error`.
+
+    ### `willTransition`
+
+    The `willTransition` action is fired at the beginning of any
+    attempted transition with a `Transition` object as the sole
+    argument. This action can be used for aborting, redirecting,
+    or decorating the transition from the currently active routes.
+
+    A good example is preventing navigation when a form is
+    half-filled out:
+
+    ```js
+    App.ContactFormRoute = Ember.Route.extend({
+      actions: {
+        willTransition: function(transition) {
+          if (this.controller.get('userHasEnteredData')) {
+            this.controller.displayNavigationConfirm();
+            transition.abort();
+          }
+        }
+      }
+    });
+    ```
+
+    You can also redirect elsewhere by calling
+    `this.transitionTo('elsewhere')` from within `willTransition`.
+    Note that `willTransition` will not be fired for the
+    redirecting `transitionTo`, since `willTransition` doesn't
+    fire when there is already a transition underway. If you want
+    subsequent `willTransition` actions to fire for the redirecting
+    transition, you must first explicitly call
+    `transition.abort()`.
+
+    ### `error`
+
+    When attempting to transition into a route, any of the hooks
+    may return a promise that rejects, at which point an `error`
+    action will be fired on the partially-entered routes, allowing
+    for per-route error handling logic, or shared error handling
+    logic defined on a parent route.
+
+    Here is an example of an error handler that will be invoked
+    for rejected promises from the various hooks on the route,
+    as well as any unhandled errors from child routes:
+
+    ```js
+    App.AdminRoute = Ember.Route.extend({
+      beforeModel: function() {
+        return Ember.RSVP.reject("bad things!");
+      },
+
+      actions: {
+        error: function(error, transition) {
+          // Assuming we got here due to the error in `beforeModel`,
+          // we can expect that error === "bad things!",
+          // but a promise model rejecting would also
+          // call this hook, as would any errors encountered
+          // in `afterModel`.
+
+          // The `error` hook is also provided the failed
+          // `transition`, which can be stored and later
+          // `.retry()`d if desired.
+
+          this.transitionTo('login');
+        }
+      }
+    });
+    ```
+
+    `error` actions that bubble up all the way to `ApplicationRoute`
+    will fire a default error handler that logs the error. You can
+    specify your own global default error handler by overriding the
+    `error` handler on `ApplicationRoute`:
+
+    ```js
+    App.ApplicationRoute = Ember.Route.extend({
+      actions: {
+        error: function(error, transition) {
+          this.controllerFor('banner').displayError(error.message);
+        }
+      }
+    });
+    ```
+
+    @property actions
+    @type Hash
+    @default null
+  */
   _actions: {
     finalizeQueryParamChange: function(params, finalParams) {
       if (Ember.FEATURES.isEnabled("query-params-new")) {
@@ -33795,7 +35026,11 @@ Ember.Route = Ember.Object.extend(Ember.ActionHandler, {
               if (!changes || !(k in changes)) {
                 // Only update the controller if the query param
                 // value wasn't overriden in setupController.
-                set(controller, k, params[queryParams[k]]);
+
+                // Arrays coming from router.js should be Emberized.
+                var newValue = params[queryParams[k]];
+                newValue = Ember.isArray(newValue) ? Ember.A(newValue) : newValue;
+                set(controller, k, newValue);
               }
               controller._finalizingQueryParams = false;
 
@@ -33920,6 +35155,8 @@ Ember.Route = Ember.Object.extend(Ember.ActionHandler, {
     @param {String} name the name of the route
     @param {...Object} models the model(s) to be used while transitioning
     to the route.
+    @return {Transition} the transition object associated with this
+      attempted transition
   */
   transitionTo: function(name, context) {
     var router = this.router;
@@ -33947,9 +35184,24 @@ Ember.Route = Ember.Object.extend(Ember.ActionHandler, {
   },
 
   /**
-    TODO description
+    Refresh the model on this route and any child routes, firing the
+    `beforeModel`, `model`, and `afterModel` hooks in a similar fashion
+    to how routes are entered when transitioning in from other route.
+    The current route params (e.g. `article_id`) will be passed in
+    to the respective model hooks, and if a different model is returned,
+    `setupController` and associated route hooks will re-fire as well.
+
+    An example usage of this method is re-querying the server for the
+    latest information using the same parameters as when the route
+    was first entered.
+
+    Note that this will cause `model` hooks to fire even on routes
+    that were provided a model object when the route was initially
+    entered.
 
     @method refresh
+    @return {Transition} the transition object associated with this
+      attempted transition
    */
   refresh: function() {
     return this.router.router.refresh(this).method('replace');
@@ -33982,6 +35234,8 @@ Ember.Route = Ember.Object.extend(Ember.ActionHandler, {
     @param {String} name the name of the route
     @param {...Object} models the model(s) to be used while transitioning
     to the route.
+    @return {Transition} the transition object associated with this
+      attempted transition
   */
   replaceWith: function() {
     var router = this.router;
@@ -34840,7 +36094,11 @@ function normalizeOptions(route, name, template, options) {
   }
 
   if (typeof controller === 'string') {
-    controller = route.container.lookup('controller:' + controller);
+    var controllerName = controller;
+    controller = route.container.lookup('controller:' + controllerName);
+    if (!controller) {
+      throw new Ember.Error("You passed `controller: '" + controllerName + "'` into the `render` method, but no such controller could be found.");
+    }
   }
 
   options.controller = controller;
@@ -36550,6 +37808,7 @@ if (Ember.FEATURES.isEnabled("query-params-new")) {
       for (var k in queryParams) {
         if (queryParams.hasOwnProperty(k)) {
           this.addObserver(k, this, this._queryParamChanged);
+          this.addObserver(k + '.[]', this, this._queryParamChanged);
         }
       }
     },
@@ -36560,11 +37819,17 @@ if (Ember.FEATURES.isEnabled("query-params-new")) {
       for (var k in queryParams) {
         if (queryParams.hasOwnProperty(k)) {
           this.removeObserver(k, this, this._queryParamChanged);
+          this.removeObserver(k + '.[]', this, this._queryParamChanged);
         }
       }
     },
 
     _queryParamChanged: function(controller, key) {
+      // Normalize array observer firings.
+      if (key.substr(-3) === '.[]') {
+        key = key.substr(0, key.length-3);
+      }
+
       if (this._finalizingQueryParams) {
         var changes = this._queryParamChangesDuringSuspension;
         if (changes) {
@@ -36574,7 +37839,7 @@ if (Ember.FEATURES.isEnabled("query-params-new")) {
       }
 
       var queryParams = get(this, '_queryParamHash');
-      queuedQueryParamChanges[queryParams[key]] = get(this, key);
+      queuedQueryParamChanges[queryParams[key]] = Ember.copy(get(this, key));
       Ember.run.once(this, this._fireQueryParamTransition);
     },
 
@@ -37156,6 +38421,7 @@ Ember.HistoryLocation = Ember.Object.extend({
 
   init: function() {
     set(this, 'location', get(this, 'location') || window.location);
+    set(this, 'baseURL', Ember.$('base').attr('href') || '');
   },
 
   /**
@@ -37187,10 +38453,12 @@ Ember.HistoryLocation = Ember.Object.extend({
   getURL: function() {
     var rootURL = get(this, 'rootURL'),
         location = get(this, 'location'),
-        path = location.pathname;
+        path = location.pathname,
+        baseURL = get(this, 'baseURL');
 
     rootURL = rootURL.replace(/\/$/, '');
-    var url = path.replace(rootURL, '');
+    baseURL = baseURL.replace(/\/$/, '');
+    var url = path.replace(baseURL, '').replace(rootURL, '');
 
     if (Ember.FEATURES.isEnabled("query-params-new")) {
       var search = location.search || '';
@@ -37319,13 +38587,17 @@ Ember.HistoryLocation = Ember.Object.extend({
     @return formatted url {String}
   */
   formatURL: function(url) {
-    var rootURL = get(this, 'rootURL');
+    var rootURL = get(this, 'rootURL'),
+        baseURL = get(this, 'baseURL');
 
     if (url !== '') {
       rootURL = rootURL.replace(/\/$/, '');
+      baseURL = baseURL.replace(/\/$/, '');
+    } else if(baseURL.match(/^\//) && rootURL.match(/^\//)) {
+      baseURL = baseURL.replace(/\/$/, '');
     }
 
-    return rootURL + url;
+    return baseURL + rootURL + url;
   },
 
   /**
@@ -37599,7 +38871,7 @@ Ember.DefaultResolver = Ember.Object.extend({
         typeSpecificResolveMethod = this[parsedName.resolveMethodName];
 
     if (!parsedName.name || !parsedName.type) {
-      throw new TypeError("Invalid fullName: `" + fullName + "`, must of of the form `type:name` ");
+      throw new TypeError("Invalid fullName: `" + fullName + "`, must be of the form `type:name` ");
     }
 
     if (typeSpecificResolveMethod) {

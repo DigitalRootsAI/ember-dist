@@ -4284,9 +4284,7 @@ function ReduceComputedProperty(options) {
 
     meta.dependentArraysObserver.suspendArrayObservers(function () {
       forEach(cp._dependentKeys, function (dependentKey) {
-        if (Ember.FEATURES.isEnabled('reduceComputed-non-array-dependencies')) {
-          if (!partiallyRecomputeFor(this, dependentKey)) { return; }
-        }
+        if (!partiallyRecomputeFor(this, dependentKey)) { return; }
 
         var dependentArray = get(this, dependentKey),
             previousDependentArray = meta.dependentArrays[dependentKey];
@@ -4315,9 +4313,7 @@ function ReduceComputedProperty(options) {
     }, this);
 
     forEach(cp._dependentKeys, function(dependentKey) {
-      if (Ember.FEATURES.isEnabled('reduceComputed-non-array-dependencies')) {
-        if (!partiallyRecomputeFor(this, dependentKey)) { return; }
-      }
+      if (!partiallyRecomputeFor(this, dependentKey)) { return; }
 
       var dependentArray = get(this, dependentKey);
       if (dependentArray) {
@@ -4325,6 +4321,7 @@ function ReduceComputedProperty(options) {
       }
     }, this);
   };
+
 
   this.func = function (propertyName) {
     Ember.assert("Computed reduce values require at least one dependent key", cp._dependentKeys);
@@ -6860,17 +6857,17 @@ Ember.ActionHandler = Ember.Mixin.create({
   mergedProperties: ['_actions'],
 
   /**
-    The collection of functions, keyed by name, available on this route as
-    action targets.
+    The collection of functions, keyed by name, available on this
+    `ActionHandler` as action targets.
 
     These functions will be invoked when a matching `{{action}}` is triggered
     from within a template and the application's current route is this route.
 
-    Actions can also be invoked from other parts of your application via `Route#send`
-    or `Controller#send`.
+    Actions can also be invoked from other parts of your application
+    via `ActionHandler#send`.
 
     The `actions` hash will inherit action handlers from
-    the `actions` hash defined on extended Route parent classes
+    the `actions` hash defined on extended parent classes
     or mixins rather than just replace the entire hash, e.g.:
 
     ```js
@@ -6897,8 +6894,9 @@ Ember.ActionHandler = Ember.Mixin.create({
     this.send('playMusic');
     ```
 
-    Within a route's action handler, the value of the `this` context
-    is the Route object:
+    Within a Controller, Route, View or Component's action handler,
+    the value of the `this` context is the Controller, Route, View or
+    Component object:
 
     ```js
     App.SongRoute = Ember.Route.extend({
@@ -6973,98 +6971,6 @@ Ember.ActionHandler = Ember.Mixin.create({
     });
     ```
 
-    ## Built-in actions
-
-    There are a few built-in actions pertaining to transitions that you
-    can use to customize transition behavior: `willTransition` and
-    `error`.
-
-    ### `willTransition`
-
-    The `willTransition` action is fired at the beginning of any
-    attempted transition with a `Transition` object as the sole
-    argument. This action can be used for aborting, redirecting,
-    or decorating the transition from the currently active routes.
-
-    A good example is preventing navigation when a form is
-    half-filled out:
-
-    ```js
-    App.ContactFormRoute = Ember.Route.extend({
-      actions: {
-        willTransition: function(transition) {
-          if (this.controller.get('userHasEnteredData')) {
-            this.controller.displayNavigationConfirm();
-            transition.abort();
-          }
-        }
-      }
-    });
-    ```
-
-    You can also redirect elsewhere by calling
-    `this.transitionTo('elsewhere')` from within `willTransition`.
-    Note that `willTransition` will not be fired for the
-    redirecting `transitionTo`, since `willTransition` doesn't
-    fire when there is already a transition underway. If you want
-    subsequent `willTransition` actions to fire for the redirecting
-    transition, you must first explicitly call
-    `transition.abort()`.
-
-    ### `error`
-
-    When attempting to transition into a route, any of the hooks
-    may return a promise that rejects, at which point an `error`
-    action will be fired on the partially-entered routes, allowing
-    for per-route error handling logic, or shared error handling
-    logic defined on a parent route.
-
-    Here is an example of an error handler that will be invoked
-    for rejected promises from the various hooks on the route,
-    as well as any unhandled errors from child routes:
-
-    ```js
-    App.AdminRoute = Ember.Route.extend({
-      beforeModel: function() {
-        return Ember.RSVP.reject("bad things!");
-      },
-
-      actions: {
-        error: function(error, transition) {
-          // Assuming we got here due to the error in `beforeModel`,
-          // we can expect that error === "bad things!",
-          // but a promise model rejecting would also
-          // call this hook, as would any errors encountered
-          // in `afterModel`.
-
-          // The `error` hook is also provided the failed
-          // `transition`, which can be stored and later
-          // `.retry()`d if desired.
-
-          this.transitionTo('login');
-        }
-      }
-    });
-    ```
-
-    `error` actions that bubble up all the way to `ApplicationRoute`
-    will fire a default error handler that logs the error. You can
-    specify your own global default error handler by overriding the
-    `error` handler on `ApplicationRoute`:
-
-    ```js
-    App.ApplicationRoute = Ember.Route.extend({
-      actions: {
-        error: function(error, transition) {
-          this.controllerFor('banner').displayError(error.message);
-        }
-      }
-    });
-    ```
-
-    @see {Ember.Route#send}
-    @see {Handlebars.helpers.action}
-
     @property actions
     @type Hash
     @default null
@@ -7108,7 +7014,8 @@ Ember.ActionHandler = Ember.Mixin.create({
       } else {
         return;
       }
-    } else if (this.deprecatedSend && this.deprecatedSendHandles && this.deprecatedSendHandles(actionName)) {
+    } else if (!Ember.FEATURES.isEnabled('ember-routing-drop-deprecated-action-style') && this.deprecatedSend && this.deprecatedSendHandles && this.deprecatedSendHandles(actionName)) {
+      Ember.warn("The current default is deprecated but will prefer to handle actions directly on the controller instead of a similarly named action in the actions hash. To turn off this deprecated feature set: Ember.FEATURES['ember-routing-drop-deprecated-action-style'] = true");
       if (this.deprecatedSend.apply(this, [].slice.call(arguments)) === true) {
         // handler return true, so this action will bubble
       } else {

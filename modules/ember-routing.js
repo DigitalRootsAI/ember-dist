@@ -404,10 +404,18 @@ define("route-recognizer",
               continue;
             }
             var pair = key;
-            if(value !== true) {
-              pair += "=" + encodeURIComponent(value);
+            if (Array.isArray(value)) {
+              for (var i = 0, l = value.length; i < l; i++) {
+                var arrayPair = key + '[]' + '=' + encodeURIComponent(value[i]);
+                pairs.push(arrayPair);
+              }
             }
-            pairs.push(pair);
+            else if (value !== true) {
+              pair += "=" + encodeURIComponent(value);
+              pairs.push(pair);
+            } else {
+              pairs.push(pair);
+            }
           }
         }
 
@@ -421,8 +429,28 @@ define("route-recognizer",
         for(var i=0; i < pairs.length; i++) {
           var pair      = pairs[i].split('='),
               key       = decodeURIComponent(pair[0]),
-              value     = pair[1] ? decodeURIComponent(pair[1]) : true;
-          queryParams[key] = value;
+              keyLength = key.length,
+              isArray = false,
+              value;
+          if (pair.length === 1) {
+            value = true;
+          } else {
+            //Handle arrays
+            if (keyLength > 2 && key.slice(keyLength -2) === '[]') {
+              isArray = true;
+              key = key.slice(0, keyLength - 2);
+              if(!queryParams[key]) {
+                queryParams[key] = [];
+              }
+            }
+            value = pair[1] ? decodeURIComponent(pair[1]) : '';
+          }
+          if (isArray) {
+            queryParams[key].push(value);
+          } else {
+            queryParams[key] = value;
+          }
+          
         }
         return queryParams;
       },
@@ -577,8 +605,7 @@ define("route-recognizer",
 
 
 (function() {
-/*jslint es5: true */
-define("router/handler-info",
+define("router/handler-info", 
   ["./utils","rsvp","exports"],
   function(__dependency1__, __dependency2__, __exports__) {
     "use strict";
@@ -782,11 +809,11 @@ define("router/handler-info",
     __exports__.UnresolvedHandlerInfoByParam = UnresolvedHandlerInfoByParam;
     __exports__.UnresolvedHandlerInfoByObject = UnresolvedHandlerInfoByObject;
   });
-define("router/router",
-  ["route-recognizer","rsvp","./utils","./transition-state","./transition","./transition-intent/named-transition-intent","./transition-intent/url-transition-intent","./transition-intent/refresh-transition-intent","exports"],
-  function(__dependency1__, __dependency2__, __dependency3__, __dependency4__, __dependency5__, __dependency6__, __dependency7__, __dependency8__, __exports__) {
+define("router/router", 
+  ["route-recognizer","rsvp","./utils","./transition-state","./transition","./transition-intent/named-transition-intent","./transition-intent/url-transition-intent","exports"],
+  function(__dependency1__, __dependency2__, __dependency3__, __dependency4__, __dependency5__, __dependency6__, __dependency7__, __exports__) {
     "use strict";
-    var RouteRecognizer = __dependency1__['default'];
+    var RouteRecognizer = __dependency1__["default"];
     var resolve = __dependency2__.resolve;
     var reject = __dependency2__.reject;
     var async = __dependency2__.async;
@@ -805,7 +832,6 @@ define("router/router",
     var TransitionAborted = __dependency5__.TransitionAborted;
     var NamedTransitionIntent = __dependency6__.NamedTransitionIntent;
     var URLTransitionIntent = __dependency7__.URLTransitionIntent;
-    var RefreshTransitionIntent = __dependency8__.RefreshTransitionIntent;
 
     var pop = Array.prototype.pop;
 
@@ -1007,9 +1033,22 @@ define("router/router",
       },
 
       refresh: function(pivotHandler) {
-        var intent = new RefreshTransitionIntent({
-          pivotHandler: pivotHandler || this.state.handlerInfos[0].handler,
-          queryParams: this._changedQueryParams
+
+
+        var state = this.activeTransition ? this.activeTransition.state : this.state;
+        var handlerInfos = state.handlerInfos;
+        var params = {};
+        for (var i = 0, len = handlerInfos.length; i < len; ++i) {
+          var handlerInfo = handlerInfos[i];
+          params[handlerInfo.name] = handlerInfo.params || {};
+        }
+
+        log(this, "Starting a refresh transition");
+        var intent = new NamedTransitionIntent({
+          name: handlerInfos[handlerInfos.length - 1].name,
+          pivotHandler: pivotHandler || handlerInfos[0].handler,
+          contexts: [], // TODO collect contexts...?
+          queryParams: this._changedQueryParams || state.queryParams || {}
         });
 
         return this.transitionByIntent(intent, false);
@@ -1065,8 +1104,7 @@ define("router/router",
         var partitionedArgs   = extractQueryParams(slice.call(arguments, 1)),
             contexts          = partitionedArgs[0],
             queryParams       = partitionedArgs[1],
-            activeQueryParams  = {},
-            effectiveQueryParams = {};
+            activeQueryParams  = this.state.queryParams;
 
         var targetHandlerInfos = this.state.handlerInfos,
             found = false, names, object, handlerInfo, handlerObj, i, len;
@@ -1098,7 +1136,8 @@ define("router/router",
 
         var newState = intent.applyToHandlers(state, recogHandlers, this.getHandler, targetHandler, true, true);
 
-        return handlerInfosEqual(newState.handlerInfos, state.handlerInfos);
+        return handlerInfosEqual(newState.handlerInfos, state.handlerInfos) && 
+               !getChangelist(activeQueryParams, queryParams);
       },
 
       trigger: function(name) {
@@ -1488,7 +1527,7 @@ define("router/router",
 
     __exports__.Router = Router;
   });
-define("router/transition-intent",
+define("router/transition-intent", 
   ["./utils","exports"],
   function(__dependency1__, __exports__) {
     "use strict";
@@ -1508,7 +1547,7 @@ define("router/transition-intent",
 
     __exports__.TransitionIntent = TransitionIntent;
   });
-define("router/transition-intent/named-transition-intent",
+define("router/transition-intent/named-transition-intent", 
   ["../transition-intent","../transition-state","../handler-info","../utils","exports"],
   function(__dependency1__, __dependency2__, __dependency3__, __dependency4__, __exports__) {
     "use strict";
@@ -1533,7 +1572,6 @@ define("router/transition-intent/named-transition-intent",
         pureArgs              = partitionedArgs[0],
         queryParams           = partitionedArgs[1],
         handlers              = recognizer.handlersFor(pureArgs[0]);
-        //handlerInfos          = generateHandlerInfosWithQueryParams({}, handlers, queryParams);
 
       var targetRouteName = handlers[handlers.length-1].handler;
 
@@ -1542,13 +1580,26 @@ define("router/transition-intent/named-transition-intent",
 
     NamedTransitionIntent.prototype.applyToHandlers = function(oldState, handlers, getHandler, targetRouteName, isIntermediate, checkingIfActive) {
 
+      var i;
       var newState = new TransitionState();
       var objects = this.contexts.slice(0);
 
       var invalidateIndex = handlers.length;
       var nonDynamicIndexes = [];
 
-      for (var i = handlers.length - 1; i >= 0; --i) {
+      // Pivot handlers are provided for refresh transitions
+      if (this.pivotHandler) {
+        for (i = 0; i < handlers.length; ++i) {
+          if (getHandler(handlers[i].handler) === this.pivotHandler) {
+            invalidateIndex = i;
+            break;
+          }
+        }
+      }
+
+      var pivotHandlerFound = !this.pivotHandler;
+
+      for (i = handlers.length - 1; i >= 0; --i) {
         var result = handlers[i];
         var name = result.handler;
         var handler = getHandler(name);
@@ -1557,7 +1608,11 @@ define("router/transition-intent/named-transition-intent",
         var newHandlerInfo = null;
 
         if (result.names.length > 0) {
-          newHandlerInfo = this.getHandlerInfoForDynamicSegment(name, handler, result.names, objects, oldHandlerInfo, targetRouteName);
+          if (i >= invalidateIndex) {
+            newHandlerInfo = this.createParamHandlerInfo(name, handler, result.names, objects, oldHandlerInfo);
+          } else {
+            newHandlerInfo = this.getHandlerInfoForDynamicSegment(name, handler, result.names, objects, oldHandlerInfo, targetRouteName);
+          }
         } else {
           // This route has no dynamic segment.
           // Therefore treat as a param-based handlerInfo
@@ -1583,8 +1638,8 @@ define("router/transition-intent/named-transition-intent",
         }
 
         var handlerToUse = oldHandlerInfo;
-        if (newHandlerInfo.shouldSupercede(oldHandlerInfo)) {
-          invalidateIndex = i;
+        if (i >= invalidateIndex || newHandlerInfo.shouldSupercede(oldHandlerInfo)) {
+          invalidateIndex = Math.min(i, invalidateIndex);
           handlerToUse = newHandlerInfo;
         }
 
@@ -1692,56 +1747,7 @@ define("router/transition-intent/named-transition-intent",
 
     __exports__.NamedTransitionIntent = NamedTransitionIntent;
   });
-define("router/transition-intent/refresh-transition-intent",
-  ["../transition-intent","../transition-state","../handler-info","../utils","exports"],
-  function(__dependency1__, __dependency2__, __dependency3__, __dependency4__, __exports__) {
-    "use strict";
-    var TransitionIntent = __dependency1__.TransitionIntent;
-    var TransitionState = __dependency2__.TransitionState;
-    var UnresolvedHandlerInfoByParam = __dependency3__.UnresolvedHandlerInfoByParam;
-    var extractQueryParams = __dependency4__.extractQueryParams;
-    var oCreate = __dependency4__.oCreate;
-    var merge = __dependency4__.merge;
-
-    function RefreshTransitionIntent(props) {
-      TransitionIntent.call(this, props);
-    }
-
-    RefreshTransitionIntent.prototype = oCreate(TransitionIntent.prototype);
-    RefreshTransitionIntent.prototype.applyToState = function(oldState, recognizer, getHandler, isIntermediate) {
-
-      var pivotHandlerFound = false;
-      var newState = new TransitionState();
-
-      var oldHandlerInfos = oldState.handlerInfos;
-      for (var i = 0, len = oldHandlerInfos.length; i < len; ++i) {
-        var handlerInfo = oldHandlerInfos[i];
-        if (handlerInfo.handler === this.pivotHandler) {
-          pivotHandlerFound = true;
-        }
-
-        if (pivotHandlerFound) {
-          newState.handlerInfos.push(new UnresolvedHandlerInfoByParam({
-            name: handlerInfo.name,
-            handler: handlerInfo.handler,
-            params: handlerInfo.params || {}
-          }));
-        } else {
-          newState.handlerInfos.push(handlerInfo);
-        }
-      }
-
-      merge(newState.queryParams, oldState.queryParams);
-      if (this.queryParams) {
-        merge(newState.queryParams, this.queryParams);
-      }
-
-      return newState;
-    };
-
-    __exports__.RefreshTransitionIntent = RefreshTransitionIntent;
-  });
-define("router/transition-intent/url-transition-intent",
+define("router/transition-intent/url-transition-intent", 
   ["../transition-intent","../transition-state","../handler-info","../utils","exports"],
   function(__dependency1__, __dependency2__, __dependency3__, __dependency4__, __exports__) {
     "use strict";
@@ -1809,7 +1815,7 @@ define("router/transition-intent/url-transition-intent",
 
     __exports__.URLTransitionIntent = URLTransitionIntent;
   });
-define("router/transition-state",
+define("router/transition-state", 
   ["./handler-info","./utils","rsvp","exports"],
   function(__dependency1__, __dependency2__, __dependency3__, __exports__) {
     "use strict";
@@ -1844,10 +1850,10 @@ define("router/transition-state",
         var wasAborted = false;
 
         // The prelude RSVP.resolve() asyncs us into the promise land.
-        return resolve().then(resolveOneHandlerInfo).catch(handleError);
+        return resolve().then(resolveOneHandlerInfo)['catch'](handleError);
 
         function innerShouldContinue() {
-          return resolve(shouldContinue()).catch(function(reason) {
+          return resolve(shouldContinue())['catch'](function(reason) {
             // We distinguish between errors that occurred
             // during resolution (e.g. beforeModel/model/afterModel),
             // and aborts due to a rejecting promise from shouldContinue().
@@ -1919,7 +1925,7 @@ define("router/transition-state",
 
     __exports__.TransitionState = TransitionState;
   });
-define("router/transition",
+define("router/transition", 
   ["rsvp","./handler-info","./utils","exports"],
   function(__dependency1__, __dependency2__, __dependency3__, __exports__) {
     "use strict";
@@ -1971,7 +1977,7 @@ define("router/transition",
         }
 
         this.sequence = Transition.currentSequence++;
-        this.promise = state.resolve(router.async, checkForAbort, this).catch(function(result) {
+        this.promise = state.resolve(router.async, checkForAbort, this)['catch'](function(result) {
           if (result.wasAborted) {
             throw logAbort(transition);
           } else {
@@ -2135,7 +2141,7 @@ define("router/transition",
        */
       followRedirects: function() {
         var router = this.router;
-        return this.promise.catch(function(reason) {
+        return this.promise['catch'](function(reason) {
           if (router.activeTransition) {
             return router.activeTransition.followRedirects();
           }
@@ -2177,7 +2183,7 @@ define("router/transition",
     __exports__.logAbort = logAbort;
     __exports__.TransitionAborted = TransitionAborted;
   });
-define("router/utils",
+define("router/utils", 
   ["exports"],
   function(__exports__) {
     "use strict";
@@ -2361,7 +2367,7 @@ define("router/utils",
     __exports__.serialize = serialize;
     __exports__.getChangelist = getChangelist;
   });
-define("router",
+define("router", 
   ["./router/router","exports"],
   function(__dependency1__, __exports__) {
     "use strict";
@@ -2369,7 +2375,6 @@ define("router",
 
     __exports__.Router = Router;
   });
-
 })();
 
 
@@ -3330,6 +3335,213 @@ Ember.Route = Ember.Object.extend(Ember.ActionHandler, {
     this.activate();
   },
 
+  /**
+    The collection of functions, keyed by name, available on this route as
+    action targets.
+
+    These functions will be invoked when a matching `{{action}}` is triggered
+    from within a template and the application's current route is this route.
+
+    Actions can also be invoked from other parts of your application via `Route#send`
+    or `Controller#send`.
+
+    The `actions` hash will inherit action handlers from
+    the `actions` hash defined on extended Route parent classes
+    or mixins rather than just replace the entire hash, e.g.:
+
+    ```js
+    App.CanDisplayBanner = Ember.Mixin.create({
+      actions: {
+        displayBanner: function(msg) {
+          // ...
+        }
+      }
+    });
+
+    App.WelcomeRoute = Ember.Route.extend(App.CanDisplayBanner, {
+      actions: {
+        playMusic: function() {
+          // ...
+        }
+      }
+    });
+
+    // `WelcomeRoute`, when active, will be able to respond
+    // to both actions, since the actions hash is merged rather
+    // then replaced when extending mixins / parent classes.
+    this.send('displayBanner');
+    this.send('playMusic');
+    ```
+
+    Within a route's action handler, the value of the `this` context
+    is the Route object:
+
+    ```js
+    App.SongRoute = Ember.Route.extend({
+      actions: {
+        myAction: function() {
+          this.controllerFor("song");
+          this.transitionTo("other.route");
+          ...
+        }
+      }
+    });
+    ```
+
+    It is also possible to call `this._super()` from within an
+    action handler if it overrides a handler defined on a parent
+    class or mixin:
+
+    Take for example the following routes:
+
+    ```js
+    App.DebugRoute = Ember.Mixin.create({
+      actions: {
+        debugRouteInformation: function() {
+          console.debug("trololo");
+        }
+      }
+    });
+
+    App.AnnoyingDebugRoute = Ember.Route.extend(App.DebugRoute, {
+      actions: {
+        debugRouteInformation: function() {
+          // also call the debugRouteInformation of mixed in App.DebugRoute
+          this._super();
+
+          // show additional annoyance
+          window.alert(...);
+        }
+      }
+    });
+    ```
+
+    ## Bubbling
+
+    By default, an action will stop bubbling once a handler defined
+    on the `actions` hash handles it. To continue bubbling the action,
+    you must return `true` from the handler:
+
+    ```js
+    App.Router.map(function() {
+      this.resource("album", function() {
+        this.route("song");
+      });
+    });
+
+    App.AlbumRoute = Ember.Route.extend({
+      actions: {
+        startPlaying: function() {
+        }
+      }
+    });
+
+    App.AlbumSongRoute = Ember.Route.extend({
+      actions: {
+        startPlaying: function() {
+          // ...
+
+          if (actionShouldAlsoBeTriggeredOnParentRoute) {
+            return true;
+          }
+        }
+      }
+    });
+    ```
+
+    ## Built-in actions
+
+    There are a few built-in actions pertaining to transitions that you
+    can use to customize transition behavior: `willTransition` and
+    `error`.
+
+    ### `willTransition`
+
+    The `willTransition` action is fired at the beginning of any
+    attempted transition with a `Transition` object as the sole
+    argument. This action can be used for aborting, redirecting,
+    or decorating the transition from the currently active routes.
+
+    A good example is preventing navigation when a form is
+    half-filled out:
+
+    ```js
+    App.ContactFormRoute = Ember.Route.extend({
+      actions: {
+        willTransition: function(transition) {
+          if (this.controller.get('userHasEnteredData')) {
+            this.controller.displayNavigationConfirm();
+            transition.abort();
+          }
+        }
+      }
+    });
+    ```
+
+    You can also redirect elsewhere by calling
+    `this.transitionTo('elsewhere')` from within `willTransition`.
+    Note that `willTransition` will not be fired for the
+    redirecting `transitionTo`, since `willTransition` doesn't
+    fire when there is already a transition underway. If you want
+    subsequent `willTransition` actions to fire for the redirecting
+    transition, you must first explicitly call
+    `transition.abort()`.
+
+    ### `error`
+
+    When attempting to transition into a route, any of the hooks
+    may return a promise that rejects, at which point an `error`
+    action will be fired on the partially-entered routes, allowing
+    for per-route error handling logic, or shared error handling
+    logic defined on a parent route.
+
+    Here is an example of an error handler that will be invoked
+    for rejected promises from the various hooks on the route,
+    as well as any unhandled errors from child routes:
+
+    ```js
+    App.AdminRoute = Ember.Route.extend({
+      beforeModel: function() {
+        return Ember.RSVP.reject("bad things!");
+      },
+
+      actions: {
+        error: function(error, transition) {
+          // Assuming we got here due to the error in `beforeModel`,
+          // we can expect that error === "bad things!",
+          // but a promise model rejecting would also
+          // call this hook, as would any errors encountered
+          // in `afterModel`.
+
+          // The `error` hook is also provided the failed
+          // `transition`, which can be stored and later
+          // `.retry()`d if desired.
+
+          this.transitionTo('login');
+        }
+      }
+    });
+    ```
+
+    `error` actions that bubble up all the way to `ApplicationRoute`
+    will fire a default error handler that logs the error. You can
+    specify your own global default error handler by overriding the
+    `error` handler on `ApplicationRoute`:
+
+    ```js
+    App.ApplicationRoute = Ember.Route.extend({
+      actions: {
+        error: function(error, transition) {
+          this.controllerFor('banner').displayError(error.message);
+        }
+      }
+    });
+    ```
+
+    @property actions
+    @type Hash
+    @default null
+  */
   _actions: {
     finalizeQueryParamChange: function(params, finalParams) {
       if (Ember.FEATURES.isEnabled("query-params-new")) {
@@ -3355,7 +3567,11 @@ Ember.Route = Ember.Object.extend(Ember.ActionHandler, {
               if (!changes || !(k in changes)) {
                 // Only update the controller if the query param
                 // value wasn't overriden in setupController.
-                set(controller, k, params[queryParams[k]]);
+
+                // Arrays coming from router.js should be Emberized.
+                var newValue = params[queryParams[k]];
+                newValue = Ember.isArray(newValue) ? Ember.A(newValue) : newValue;
+                set(controller, k, newValue);
               }
               controller._finalizingQueryParams = false;
 
@@ -3480,6 +3696,8 @@ Ember.Route = Ember.Object.extend(Ember.ActionHandler, {
     @param {String} name the name of the route
     @param {...Object} models the model(s) to be used while transitioning
     to the route.
+    @return {Transition} the transition object associated with this
+      attempted transition
   */
   transitionTo: function(name, context) {
     var router = this.router;
@@ -3507,9 +3725,24 @@ Ember.Route = Ember.Object.extend(Ember.ActionHandler, {
   },
 
   /**
-    TODO description
+    Refresh the model on this route and any child routes, firing the
+    `beforeModel`, `model`, and `afterModel` hooks in a similar fashion
+    to how routes are entered when transitioning in from other route.
+    The current route params (e.g. `article_id`) will be passed in
+    to the respective model hooks, and if a different model is returned,
+    `setupController` and associated route hooks will re-fire as well.
+
+    An example usage of this method is re-querying the server for the
+    latest information using the same parameters as when the route
+    was first entered.
+
+    Note that this will cause `model` hooks to fire even on routes
+    that were provided a model object when the route was initially
+    entered.
 
     @method refresh
+    @return {Transition} the transition object associated with this
+      attempted transition
    */
   refresh: function() {
     return this.router.router.refresh(this).method('replace');
@@ -3542,6 +3775,8 @@ Ember.Route = Ember.Object.extend(Ember.ActionHandler, {
     @param {String} name the name of the route
     @param {...Object} models the model(s) to be used while transitioning
     to the route.
+    @return {Transition} the transition object associated with this
+      attempted transition
   */
   replaceWith: function() {
     var router = this.router;
@@ -4415,7 +4650,11 @@ function normalizeOptions(route, name, template, options) {
   }
 
   if (typeof controller === 'string') {
-    controller = route.container.lookup('controller:' + controller);
+    var controllerName = controller;
+    controller = route.container.lookup('controller:' + controllerName);
+    if (!controller) {
+      throw new Ember.Error("You passed `controller: '" + controllerName + "'` into the `render` method, but no such controller could be found.");
+    }
   }
 
   options.controller = controller;
@@ -6142,6 +6381,7 @@ if (Ember.FEATURES.isEnabled("query-params-new")) {
       for (var k in queryParams) {
         if (queryParams.hasOwnProperty(k)) {
           this.addObserver(k, this, this._queryParamChanged);
+          this.addObserver(k + '.[]', this, this._queryParamChanged);
         }
       }
     },
@@ -6152,11 +6392,17 @@ if (Ember.FEATURES.isEnabled("query-params-new")) {
       for (var k in queryParams) {
         if (queryParams.hasOwnProperty(k)) {
           this.removeObserver(k, this, this._queryParamChanged);
+          this.removeObserver(k + '.[]', this, this._queryParamChanged);
         }
       }
     },
 
     _queryParamChanged: function(controller, key) {
+      // Normalize array observer firings.
+      if (key.substr(-3) === '.[]') {
+        key = key.substr(0, key.length-3);
+      }
+
       if (this._finalizingQueryParams) {
         var changes = this._queryParamChangesDuringSuspension;
         if (changes) {
@@ -6166,7 +6412,7 @@ if (Ember.FEATURES.isEnabled("query-params-new")) {
       }
 
       var queryParams = get(this, '_queryParamHash');
-      queuedQueryParamChanges[queryParams[key]] = get(this, key);
+      queuedQueryParamChanges[queryParams[key]] = Ember.copy(get(this, key));
       Ember.run.once(this, this._fireQueryParamTransition);
     },
 
@@ -6751,6 +6997,7 @@ Ember.HistoryLocation = Ember.Object.extend({
 
   init: function() {
     set(this, 'location', get(this, 'location') || window.location);
+    set(this, 'baseURL', Ember.$('base').attr('href') || '');
   },
 
   /**
@@ -6782,10 +7029,12 @@ Ember.HistoryLocation = Ember.Object.extend({
   getURL: function() {
     var rootURL = get(this, 'rootURL'),
         location = get(this, 'location'),
-        path = location.pathname;
+        path = location.pathname,
+        baseURL = get(this, 'baseURL');
 
     rootURL = rootURL.replace(/\/$/, '');
-    var url = path.replace(rootURL, '');
+    baseURL = baseURL.replace(/\/$/, '');
+    var url = path.replace(baseURL, '').replace(rootURL, '');
 
     if (Ember.FEATURES.isEnabled("query-params-new")) {
       var search = location.search || '';
@@ -6914,13 +7163,17 @@ Ember.HistoryLocation = Ember.Object.extend({
     @return formatted url {String}
   */
   formatURL: function(url) {
-    var rootURL = get(this, 'rootURL');
+    var rootURL = get(this, 'rootURL'),
+        baseURL = get(this, 'baseURL');
 
     if (url !== '') {
       rootURL = rootURL.replace(/\/$/, '');
+      baseURL = baseURL.replace(/\/$/, '');
+    } else if(baseURL.match(/^\//) && rootURL.match(/^\//)) {
+      baseURL = baseURL.replace(/\/$/, '');
     }
 
-    return rootURL + url;
+    return baseURL + rootURL + url;
   },
 
   /**
