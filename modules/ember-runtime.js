@@ -183,6 +183,39 @@ Ember.copy = function(obj, deep) {
 };
 
 /**
+  Convenience method to inspect an object. This method will attempt to
+  convert the object into a useful string description.
+
+  It is a pretty simple implementation. If you want something more robust,
+  use something like JSDump: https://github.com/NV/jsDump
+
+  @method inspect
+  @for Ember
+  @param {Object} obj The object you want to inspect.
+  @return {String} A description of the object
+*/
+Ember.inspect = function(obj) {
+  var type = Ember.typeOf(obj);
+  if (type === 'array') {
+    return '[' + obj + ']';
+  }
+  if (type !== 'object') {
+    return obj + '';
+  }
+
+  var v, ret = [];
+  for(var key in obj) {
+    if (obj.hasOwnProperty(key)) {
+      v = obj[key];
+      if (v === 'toString') { continue; } // ignore useless items
+      if (Ember.typeOf(v) === 'function') { v = "function() { ... }"; }
+      ret.push(key + ": " + v);
+    }
+  }
+  return "{" + ret.join(", ") + "}";
+};
+
+/**
   Compares two objects, returning true if they are logically equal. This is
   a deeper comparison than a simple triple equal. For sets it will compare the
   internal objects. For any other object that implements `isEqual()` it will
@@ -286,10 +319,6 @@ var STRING_DECAMELIZE_REGEXP = (/([a-z\d])([A-Z])/g);
 var STRING_CAMELIZE_REGEXP = (/(\-|_|\.|\s)+(.)?/g);
 var STRING_UNDERSCORE_REGEXP_1 = (/([a-z\d])([A-Z]+)/g);
 var STRING_UNDERSCORE_REGEXP_2 = (/\-|\s+/g);
-var STRING_PARAMETERIZE_REGEXP_1 = (/[_|\/|\s]+/g);
-var STRING_PARAMETERIZE_REGEXP_2 = (/[^a-z0-9\-]+/gi);
-var STRING_PARAMETERIZE_REGEXP_3 = (/[\-]+/g);
-var STRING_PARAMETERIZE_REGEXP_4 = (/^-+|-+$/g);
 
 /**
   Defines the hash of localized strings for the current language. Used by
@@ -554,29 +583,6 @@ if (Ember.FEATURES.isEnabled("string-humanize")) {
   };
 }
 
-if (Ember.FEATURES.isEnabled("string-parameterize")) {
-  /**
-    Transforms a string so that it may be used as part of a 'pretty' / SEO friendly URL.
-
-    ```javascript
-    'My favorite items.'.parameterize();                        // 'my-favorite-items'
-    'action_name'.parameterize();                               // 'action-name'
-    '100 ways Ember.js is better than Angular.'.parameterize(); // '100-ways-emberjs-is-better-than-angular'
-    ```
-
-    @method parameterize
-    @param {String} str The string to parameterize.
-    @return {String} the parameterized string.
-  */
-  Ember.String.parameterize = function(str) {
-    return str.replace(STRING_PARAMETERIZE_REGEXP_1, '-') // replace underscores, slashes and spaces with separator
-              .replace(STRING_PARAMETERIZE_REGEXP_2, '')  // remove non-alphanumeric characters except the separator
-              .replace(STRING_PARAMETERIZE_REGEXP_3, '-') // replace multiple occurring separators
-              .replace(STRING_PARAMETERIZE_REGEXP_4, '')  // trim leading and trailing separators 
-              .toLowerCase();
-  };
-}
-
 
 })();
 
@@ -601,11 +607,7 @@ var fmt = Ember.String.fmt,
     classify = Ember.String.classify;
 
 if (Ember.FEATURES.isEnabled("string-humanize")) {
-  var humanize = Ember.String.humanize;
-}
-
-if (Ember.FEATURES.isEnabled("string-parameterize")) {
-  var parameterize = Ember.String.parameterize;
+    var humanize = Ember.String.humanize;
 }
 
 if (Ember.EXTEND_PROTOTYPES === true || Ember.EXTEND_PROTOTYPES.String) {
@@ -709,18 +711,6 @@ if (Ember.EXTEND_PROTOTYPES === true || Ember.EXTEND_PROTOTYPES.String) {
     */
     String.prototype.humanize = function() {
       return humanize(this);
-    };
-  }
-
-  if (Ember.FEATURES.isEnabled("string-parameterize")) {
-    /**
-      See [Ember.String.parameterize](/api/classes/Ember.String.html#method_parameterize).
-
-      @method parameterize
-      @for String
-    */
-    String.prototype.parameterize = function() {
-      return parameterize(this);
     };
   }
 
@@ -3097,7 +3087,7 @@ Ember.Enumerable = Ember.Mixin.create({
     var ret = initialValue;
 
     this.forEach(function(item, i) {
-      ret = callback(ret, item, i, this, reducerProperty);
+      ret = callback.call(null, ret, item, i, this, reducerProperty);
     }, this);
 
     return ret;
@@ -3120,7 +3110,7 @@ Ember.Enumerable = Ember.Mixin.create({
     this.forEach(function(x, idx) {
       var method = x && x[methodName];
       if ('function' === typeof method) {
-        ret[idx] = args ? method.apply(x, args) : x[methodName]();
+        ret[idx] = args ? method.apply(x, args) : method.call(x);
       }
     }, this);
 
@@ -3315,6 +3305,8 @@ Ember.Enumerable = Ember.Mixin.create({
     notify range observers.
 
     @method enumerableContentDidChange
+    @param {Number} [start] optional start offset for the content change.
+      For unordered enumerables, you should always pass -1.
     @param {Ember.Enumerable|Number} removing An enumerable of the objects to
       be removed or the number of items to be removed.
     @param {Ember.Enumerable|Number} adding  An enumerable of the objects to
@@ -3524,7 +3516,7 @@ Ember.Array = Ember.Mixin.create(Ember.Enumerable, {
 
     @method slice
     @param {Integer} beginIndex (Optional) index to begin slicing from.
-    @param {Integer} endIndex (Optional) index to end the slice at (but not included).
+    @param {Integer} endIndex (Optional) index to end the slice at.
     @return {Array} New array with specified slice
   */
   slice: function(beginIndex, endIndex) {
@@ -3675,7 +3667,7 @@ Ember.Array = Ember.Mixin.create(Ember.Enumerable, {
     Becomes true whenever the array currently has observers watching changes
     on the array.
 
-    @property {Boolean} hasArrayObservers
+    @property Boolean
   */
   hasArrayObservers: Ember.computed(function() {
     return Ember.hasListeners(this, '@array:change') || Ember.hasListeners(this, '@array:before');
@@ -4322,7 +4314,6 @@ function ReduceComputedProperty(options) {
     }, this);
   };
 
-
   this.func = function (propertyName) {
     Ember.assert("Computed reduce values require at least one dependent key", cp._dependentKeys);
 
@@ -4530,7 +4521,7 @@ ReduceComputedProperty.prototype.property = function () {
 
   ```javascript
   Ember.computed.max = function (dependentKey) {
-    return Ember.reduceComputed(dependentKey, {
+    return Ember.reduceComputed.call(null, dependentKey, {
       initialValue: -Infinity,
 
       addedItem: function (accumulatedValue, item, changeMeta, instanceMeta) {
@@ -4840,30 +4831,6 @@ var get = Ember.get,
     SearchProxy;
 
 /**
- A computed property that returns the sum of the value
- in the dependent array.
-
- @method computed.sum
- @for Ember
- @param {String} dependentKey
- @return {Ember.ComputedProperty} computes the sum of all values in the dependentKey's array
-*/
-
-Ember.computed.sum = function(dependentKey){
-  return Ember.reduceComputed(dependentKey, {
-    initialValue: 0,
-
-    addedItem: function(accumulatedValue, item, changeMeta, instanceMeta){
-      return accumulatedValue + item;
-    },
-
-    removedItem: function(accumulatedValue, item, changeMeta, instanceMeta){
-      return accumulatedValue - item;
-    }
-  });
-};
-
-/**
   A computed property that calculates the maximum value in the
   dependent array. This will return `-Infinity` when the dependent
   array is empty.
@@ -4896,7 +4863,7 @@ Ember.computed.sum = function(dependentKey){
   @return {Ember.ComputedProperty} computes the largest value in the dependentKey's array
 */
 Ember.computed.max = function (dependentKey) {
-  return Ember.reduceComputed(dependentKey, {
+  return Ember.reduceComputed.call(null, dependentKey, {
     initialValue: -Infinity,
 
     addedItem: function (accumulatedValue, item, changeMeta, instanceMeta) {
@@ -4944,7 +4911,7 @@ Ember.computed.max = function (dependentKey) {
   @return {Ember.ComputedProperty} computes the smallest value in the dependentKey's array
 */
 Ember.computed.min = function (dependentKey) {
-  return Ember.reduceComputed(dependentKey, {
+  return Ember.reduceComputed.call(null, dependentKey, {
     initialValue: Infinity,
 
     addedItem: function (accumulatedValue, item, changeMeta, instanceMeta) {
@@ -5229,7 +5196,7 @@ Ember.computed.union = Ember.computed.uniq;
 
 /**
   A computed property which returns a new array with all the duplicated
-  elements from two or more dependent arrays.
+  elements from two or more dependeny arrays.
 
   Example
 
@@ -5335,7 +5302,7 @@ Ember.computed.setDiff = function (setAProperty, setBProperty) {
   if (arguments.length !== 2) {
     throw new Ember.Error("setDiff requires exactly two dependent arrays.");
   }
-  return Ember.arrayComputed(setAProperty, setBProperty, {
+  return Ember.arrayComputed.call(null, setAProperty, setBProperty, {
     addedItem: function (array, item, changeMeta, instanceMeta) {
       var setA = get(this, setAProperty),
           setB = get(this, setBProperty);
@@ -5537,7 +5504,7 @@ Ember.computed.sort = function (itemsKey, sortDefinition) {
     };
   }
 
-  return Ember.arrayComputed(itemsKey, {
+  return Ember.arrayComputed.call(null, itemsKey, {
     initialize: initFn,
 
     addedItem: function (array, item, changeMeta, instanceMeta) {
@@ -5706,8 +5673,6 @@ if (Ember.EXTEND_PROTOTYPES === true || Ember.EXTEND_PROTOTYPES.Function) {
       for (var i=0; i<arguments.length; ++i) {
         expandProperties(arguments[i], addWatchedProperty);
       }
-
-      this.__ember_observes__ = watched;
     } else {
       this.__ember_observes__ = a_slice.call(arguments);
     }
@@ -6988,8 +6953,6 @@ Ember.ActionHandler = Ember.Mixin.create({
     var hashName;
 
     if (!props._actions) {
-      Ember.assert(this + " 'actions' should not be a function", typeof(props.actions) !== 'function');
-
       if (typeOf(props.actions) === 'object') {
         hashName = 'actions';
       } else if (typeOf(props.events) === 'object') {
@@ -7014,8 +6977,7 @@ Ember.ActionHandler = Ember.Mixin.create({
       } else {
         return;
       }
-    } else if (!Ember.FEATURES.isEnabled('ember-routing-drop-deprecated-action-style') && this.deprecatedSend && this.deprecatedSendHandles && this.deprecatedSendHandles(actionName)) {
-      Ember.warn("The current default is deprecated but will prefer to handle actions directly on the controller instead of a similarly named action in the actions hash. To turn off this deprecated feature set: Ember.FEATURES['ember-routing-drop-deprecated-action-style'] = true");
+    } else if (this.deprecatedSend && this.deprecatedSendHandles && this.deprecatedSendHandles(actionName)) {
       if (this.deprecatedSend.apply(this, [].slice.call(arguments)) === true) {
         // handler return true, so this action will bubble
       } else {
@@ -7037,6 +6999,8 @@ Ember.ActionHandler = Ember.Mixin.create({
 
 (function() {
 var set = Ember.set, get = Ember.get,
+    resolve = Ember.RSVP.resolve,
+    rethrow = Ember.RSVP.rethrow,
     not = Ember.computed.not,
     or = Ember.computed.or;
 
@@ -7045,15 +7009,14 @@ var set = Ember.set, get = Ember.get,
   @submodule ember-runtime
  */
 
-function tap(proxy, promise) {
-  return promise.then(function(value) {
+function observePromise(proxy, promise) {
+  promise.then(function(value) {
     set(proxy, 'isFulfilled', true);
     set(proxy, 'content', value);
-    return value;
   }, function(reason) {
     set(proxy, 'isRejected', true);
     set(proxy, 'reason', reason);
-    throw reason;
+    // don't re-throw, as we are merely observing
   }, "Ember: PromiseProxy");
 }
 
@@ -7182,7 +7145,9 @@ Ember.PromiseProxyMixin = Ember.Mixin.create({
   */
   promise: Ember.computed(function(key, promise) {
     if (arguments.length === 2) {
-      return tap(this, promise);
+      promise = resolve(promise);
+      observePromise(this, promise);
+      return promise.then(); // fork the promise.
     } else {
       throw new Ember.Error("PromiseProxy's promise must be set");
     }

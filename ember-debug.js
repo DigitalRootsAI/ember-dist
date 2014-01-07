@@ -7,7 +7,7 @@ var Ember = { assert: function() {}, FEATURES: { isEnabled: function() {} } };
  *            Portions Copyright 2008-2011 Apple Inc. All rights reserved.
  * @license   Licensed under MIT license
  *            See https://raw.github.com/emberjs/ember.js/master/LICENSE
- * @version   1.4.0-beta.1+canary.ed89e1ea
+ * @version   1.3.0
  */
 
 
@@ -72,6 +72,11 @@ if (!('MANDATORY_SETTER' in Ember.ENV)) {
 */
 Ember.assert = function(desc, test) {
   if (!test) {
+    Ember.Logger.assert(test, desc);
+  }
+
+  if (Ember.testing && !test) {
+    // when testing, ensure test failures when assertions fail
     throw new Ember.Error("Assertion Failed: " + desc);
   }
 };

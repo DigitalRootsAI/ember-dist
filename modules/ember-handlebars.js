@@ -983,12 +983,6 @@ Ember._HandlebarsBoundView = Ember._MetamorphView.extend({
         preserveContext = get(this, 'preserveContext'),
         context = get(this, 'previousContext');
 
-    var _contextController;
-
-    if (Ember.FEATURES.isEnabled('with-controller')) {
-      _contextController = get(this, '_contextController');
-    }
-
     var inverseTemplate = get(this, 'inverseTemplate'),
         displayTemplate = get(this, 'displayTemplate');
 
@@ -1008,12 +1002,6 @@ Ember._HandlebarsBoundView = Ember._MetamorphView.extend({
       // Otherwise, determine if this is a block bind or not.
       // If so, pass the specified object to the template
         if (displayTemplate) {
-          if (Ember.FEATURES.isEnabled('with-controller')) {
-            if (_contextController) {
-              set(_contextController, 'content', result);
-              result = _contextController;
-            }
-          }
           set(this, '_context', result);
         } else {
         // This is not a bind block, just push the result of the
@@ -1114,16 +1102,6 @@ function bind(property, options, preserveContext, shouldDisplay, valueNormalizer
         templateData: options.data
       });
 
-      if (Ember.FEATURES.isEnabled('with-controller'))  {
-        if (options.hash.controller) {
-          bindView.set('_contextController', this.container.lookupFactory('controller:'+options.hash.controller).create({
-            container: currentContext.container,
-            parentController: currentContext,
-            target: currentContext
-          }));
-        }
-      }
-
       view.appendChild(bindView);
 
       observer = function() {
@@ -1195,17 +1173,6 @@ function simpleBind(currentContext, property, options) {
     // be done with it.
     output = handlebarsGet(currentContext, property, options);
     data.buffer.push((output === null || typeof output === 'undefined') ? '' : output);
-  }
-}
-
-function shouldDisplayIfHelperContent(result) {
-  var truthy = result && get(result, 'isTruthy');
-  if (typeof truthy === 'boolean') { return truthy; }
-
-  if (Ember.isArray(result)) {
-    return get(result, 'length') !== 0;
-  } else {
-    return !!result;
   }
 }
 
@@ -1313,43 +1280,18 @@ EmberHandlebars.registerHelper('bind', function bindHelper(property, options) {
 */
 EmberHandlebars.registerHelper('boundIf', function boundIfHelper(property, fn) {
   var context = (fn.contexts && fn.contexts.length) ? fn.contexts[0] : this;
+  var func = function(result) {
+    var truthy = result && get(result, 'isTruthy');
+    if (typeof truthy === 'boolean') { return truthy; }
 
-  return bind.call(context, property, fn, true, shouldDisplayIfHelperContent, shouldDisplayIfHelperContent, ['isTruthy', 'length']);
-});
+    if (Ember.isArray(result)) {
+      return get(result, 'length') !== 0;
+    } else {
+      return !!result;
+    }
+  };
 
-
-/**
-  @private
-
-  Use the `unboundIf` helper to create a conditional that evaluates once.
-
-  ```handlebars
-  {{#unboundIf "content.shouldDisplayTitle"}}
-    {{content.title}}
-  {{/unboundIf}}
-  ```
-
-  @method unboundIf
-  @for Ember.Handlebars.helpers
-  @param {String} property Property to bind
-  @param {Function} fn Context to provide for rendering
-  @return {String} HTML string
-*/
-EmberHandlebars.registerHelper('unboundIf', function unboundIfHelper(property, fn) {
-  var context = (fn.contexts && fn.contexts.length) ? fn.contexts[0] : this,
-      data = fn.data,
-      template = fn.fn,
-      inverse = fn.inverse,
-      normalized, propertyValue, result;
-
-  normalized = normalizePath(context, property, data);
-  propertyValue = handlebarsGet(context, property, fn);
-
-  if (!shouldDisplayIfHelperContent(propertyValue)) {
-    template = inverse;
-  }
-
-  template(context, { data: data });
+  return bind.call(context, property, fn, true, func, func, ['isTruthy', 'length']);
 });
 
 /**
@@ -1452,7 +1394,6 @@ EmberHandlebars.registerHelper('with', function withHelper(context, options) {
 
 /**
   See [boundIf](/api/classes/Ember.Handlebars.helpers.html#method_boundIf)
-  and [unboundIf](/api/classes/Ember.Handlebars.helpers.html#method_unboundIf)
 
   @method if
   @for Ember.Handlebars.helpers
@@ -1463,11 +1404,8 @@ EmberHandlebars.registerHelper('with', function withHelper(context, options) {
 EmberHandlebars.registerHelper('if', function ifHelper(context, options) {
   Ember.assert("You must pass exactly one argument to the if helper", arguments.length === 2);
   Ember.assert("You must pass a block to the if helper", options.fn && options.fn !== Handlebars.VM.noop);
-  if (options.data.isUnbound) {
-    return helpers.unboundIf.call(options.contexts[0], context, options);
-  } else {
-    return helpers.boundIf.call(options.contexts[0], context, options);
-  }
+
+  return helpers.boundIf.call(options.contexts[0], context, options);
 });
 
 /**
@@ -1486,11 +1424,7 @@ EmberHandlebars.registerHelper('unless', function unlessHelper(context, options)
   options.fn = inverse;
   options.inverse = fn;
 
-  if (options.data.isUnbound) {
-    return helpers.unboundIf.call(options.contexts[0], context, options);
-  } else {
-    return helpers.boundIf.call(options.contexts[0], context, options);
-  }
+  return helpers.boundIf.call(options.contexts[0], context, options);
 });
 
 /**
@@ -2266,7 +2200,7 @@ var get = Ember.get, handlebarsGet = Ember.Handlebars.get, fmt = Ember.String.fm
   </div>
   ```
 
-  ### Blockless use in a collection
+  ### Blockless Use
 
   If you provide an `itemViewClass` option that has its own `template` you can
   omit the block.
@@ -2363,20 +2297,11 @@ Ember.Handlebars.registerHelper('collection', function collectionHelper(path, op
   var inverse = options.inverse;
   var view = options.data.view;
 
-
-  var controller, container;
   // If passed a path string, convert that into an object.
   // Otherwise, just default to the standard class.
   var collectionClass;
-  if (path) {
-    controller = data.keywords.controller;
-    container = controller && controller.container;
-    collectionClass = handlebarsGet(this, path, options) || container.lookupFactory('view:' + path); 
-    Ember.assert(fmt("%@ #collection: Could not find collection class %@", [data.view, path]), !!collectionClass);
-  }
-  else {
-    collectionClass = Ember.CollectionView;
-  }
+  collectionClass = path ? handlebarsGet(this, path, options) : Ember.CollectionView;
+  Ember.assert(fmt("%@ #collection: Could not find collection class %@", [data.view, path]), !!collectionClass);
 
   var hash = options.hash, itemHash = {}, match;
 
@@ -2385,15 +2310,15 @@ Ember.Handlebars.registerHelper('collection', function collectionHelper(path, op
       itemViewClass;
 
   if (hash.itemView) {
-    controller = data.keywords.controller;
+    var controller = data.keywords.controller;
     Ember.assert('You specified an itemView, but the current context has no ' +
                  'container to look the itemView up in. This probably means ' +
                  'that you created a view manually, instead of through the ' +
                  'container. Instead, use container.lookup("view:viewName"), ' +
                  'which will properly instantiate your view.',
                  controller && controller.container);
-    container = controller.container;
-    itemViewClass = container.lookupFactory('view:' + hash.itemView);
+    var container = controller.container;
+    itemViewClass = container.resolve('view:' + hash.itemView);
     Ember.assert('You specified the itemView ' + hash.itemView + ", but it was " +
                  "not found at " + container.describe("view:" + hash.itemView) +
                  " (and it was not registered in the container)", !!itemViewClass);
@@ -2591,7 +2516,6 @@ Ember.Handlebars.registerHelper('debugger', function debuggerHelper(options) {
 */
 
 var get = Ember.get, set = Ember.set;
-var fmt = Ember.String.fmt;
 
 Ember.Handlebars.EachView = Ember.CollectionView.extend(Ember._Metamorph, {
   init: function() {
@@ -2624,13 +2548,8 @@ Ember.Handlebars.EachView = Ember.CollectionView.extend(Ember._Metamorph, {
   },
 
   _assertArrayLike: function(content) {
-    Ember.assert(fmt("The value that #each loops over must be an Array. You " +
-                     "passed %@, but it should have been an ArrayController",
-                     [content.constructor]),
-                     !Ember.ControllerMixin.detect(content) ||
-                       (content && content.isGenerated) ||
-                       content instanceof Ember.ArrayController);
-    Ember.assert(fmt("The value that #each loops over must be an Array. You passed %@", [(Ember.ControllerMixin.detect(content) && content.get('model') !== undefined) ? fmt("'%@' (wrapped in %@)", [content.get('model'), content]) : content]), Ember.Array.detect(content));
+    Ember.assert("The value that #each loops over must be an Array. You passed " + content.constructor + ", but it should have been an ArrayController", !Ember.ControllerMixin.detect(content) || (content && content.isGenerated) || content instanceof Ember.ArrayController);
+    Ember.assert("The value that #each loops over must be an Array. You passed " + ((Ember.ControllerMixin.detect(content) && content.get('model') !== undefined) ? ("" + content.get('model') + " (wrapped in " + content + ")") : ("" + content)), Ember.Array.detect(content));
   },
 
   disableContentObservers: function(callback) {
@@ -3589,7 +3508,7 @@ Ember.TextField = Ember.Component.extend(Ember.TextSupport, {
 
   classNames: ['ember-text-field'],
   tagName: "input",
-  attributeBindings: ['type', 'value', 'size', 'pattern', 'name', 'min', 'max'],
+  attributeBindings: ['type', 'value', 'size', 'pattern', 'name'],
 
   /**
     The `value` attribute of the input element. As the user inputs text, this
@@ -3620,31 +3539,141 @@ Ember.TextField = Ember.Component.extend(Ember.TextSupport, {
   size: null,
 
   /**
-    The `pattern` attribute of input element.
+    The `pattern` the pattern attribute of input element.
 
     @property pattern
     @type String
     @default null
   */
-  pattern: null,
+  pattern: null
+});
 
-  /**
-    The `min` attribute of input element used with `type="number"` or `type="range"`.
+})();
 
-    @property min 
-    @type String
-    @default null
+
+
+(function() {
+/*
+@module ember
+@submodule ember-handlebars
+*/
+
+var get = Ember.get, set = Ember.set;
+
+/*
+  @class Button
+  @namespace Ember
+  @extends Ember.View
+  @uses Ember.TargetActionSupport
+  @deprecated
+*/
+Ember.Button = Ember.View.extend(Ember.TargetActionSupport, {
+  classNames: ['ember-button'],
+  classNameBindings: ['isActive'],
+
+  tagName: 'button',
+
+  propagateEvents: false,
+
+  attributeBindings: ['type', 'disabled', 'href', 'tabindex'],
+
+  /*
+    @private
+
+    Overrides `TargetActionSupport`'s `targetObject` computed
+    property to use Handlebars-specific path resolution.
+
+    @property targetObject
   */
-  min: null,
+  targetObject: Ember.computed(function() {
+    var target = get(this, 'target'),
+        root = get(this, 'context'),
+        data = get(this, 'templateData');
 
-  /**
-    The `max` attribute of input element used with `type="number"` or `type="range"`.
+    if (typeof target !== 'string') { return target; }
 
-    @property max 
-    @type String
-    @default null
-  */
-  max: null
+    return Ember.Handlebars.get(root, target, { data: data });
+  }).property('target'),
+
+  // Defaults to 'button' if tagName is 'input' or 'button'
+  type: Ember.computed(function(key) {
+    var tagName = this.tagName;
+    if (tagName === 'input' || tagName === 'button') { return 'button'; }
+  }),
+
+  disabled: false,
+
+  // Allow 'a' tags to act like buttons
+  href: Ember.computed(function() {
+    return this.tagName === 'a' ? '#' : null;
+  }),
+
+  mouseDown: function() {
+    if (!get(this, 'disabled')) {
+      set(this, 'isActive', true);
+      this._mouseDown = true;
+      this._mouseEntered = true;
+    }
+    return get(this, 'propagateEvents');
+  },
+
+  mouseLeave: function() {
+    if (this._mouseDown) {
+      set(this, 'isActive', false);
+      this._mouseEntered = false;
+    }
+  },
+
+  mouseEnter: function() {
+    if (this._mouseDown) {
+      set(this, 'isActive', true);
+      this._mouseEntered = true;
+    }
+  },
+
+  mouseUp: function(event) {
+    if (get(this, 'isActive')) {
+      // Actually invoke the button's target and action.
+      // This method comes from the Ember.TargetActionSupport mixin.
+      this.triggerAction();
+      set(this, 'isActive', false);
+    }
+
+    this._mouseDown = false;
+    this._mouseEntered = false;
+    return get(this, 'propagateEvents');
+  },
+
+  keyDown: function(event) {
+    // Handle space or enter
+    if (event.keyCode === 13 || event.keyCode === 32) {
+      this.mouseDown();
+    }
+  },
+
+  keyUp: function(event) {
+    // Handle space or enter
+    if (event.keyCode === 13 || event.keyCode === 32) {
+      this.mouseUp();
+    }
+  },
+
+  // TODO: Handle proper touch behavior. Including should make inactive when
+  // finger moves more than 20x outside of the edge of the button (vs mouse
+  // which goes inactive as soon as mouse goes out of edges.)
+
+  touchStart: function(touch) {
+    return this.mouseDown(touch);
+  },
+
+  touchEnd: function(touch) {
+    return this.mouseUp(touch);
+  },
+
+  init: function() {
+    Ember.deprecate("Ember.Button is deprecated and will be removed from future releases. Consider using the `{{action}}` helper.");
+    this._super();
+  }
 });
 
 })();

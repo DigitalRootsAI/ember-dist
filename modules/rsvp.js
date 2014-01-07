@@ -1599,7 +1599,7 @@ define("rsvp/promise/all",
       ```
 
       @method all
-      @for Ember.RSVP.Promise
+      @for RSVP.Promise
       @param {Array} entries array of promises
       @param {String} label optional string for labeling the promise.
       Useful for tooling.

@@ -480,7 +480,7 @@ function isolate(fn, val) {
   // Reset lastPromise for nested helpers
   Ember.Test.lastPromise = null;
 
-  value = fn(val);
+  value = fn.call(null, val);
 
   lastPromise = Ember.Test.lastPromise;
 

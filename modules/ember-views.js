@@ -4,7 +4,7 @@
 @submodule ember-views
 */
 
-var jQuery = (this && this.jQuery) || (Ember.imports && Ember.imports.jQuery);
+var jQuery = this.jQuery || (Ember.imports && Ember.imports.jQuery);
 if (!jQuery && typeof require === 'function') {
   jQuery = require('jquery');
 }
@@ -55,7 +55,7 @@ if (Ember.$) {
 // is a "zero-scope" element. This problem can be worked around by making
 // the first node an invisible text node. We, like Modernizr, use &shy;
 
-var needsShy = typeof document !== 'undefined' && (function() {
+var needsShy = this.document && (function() {
   var testEl = document.createElement('div');
   testEl.innerHTML = "<div></div>";
   testEl.firstChild.innerHTML = "<script></script>";
@@ -65,7 +65,7 @@ var needsShy = typeof document !== 'undefined' && (function() {
 // IE 8 (and likely earlier) likes to move whitespace preceeding
 // a script tag to appear after it. This means that we can
 // accidentally remove whitespace when updating a morph.
-var movesWhitespace = typeof document !== 'undefined' && (function() {
+var movesWhitespace = this.document && (function() {
   var testEl = document.createElement('div');
   testEl.innerHTML = "Test: <script type='text/x-placeholder'></script>Value";
   return testEl.childNodes[0].nodeValue === 'Test:' &&
@@ -3286,8 +3286,6 @@ Ember.View = Ember.CoreView.extend({
     element was destroyed, it is in the preRender state
   * inBuffer: once a view has been rendered, but before it has
     been inserted into the DOM, it is in the inBuffer state
-  * hasElement: the DOM representation of the view is created,
-    and is ready to be inserted
   * inDOM: once a view has been inserted into the DOM it is in
     the inDOM state. A view spends the vast majority of its
     existence in this state.
@@ -3791,17 +3789,7 @@ Ember.merge(hasElement, {
     observer.call(target);
   }
 });
-})();
 
-
-
-(function() {
-/**
-@module ember
-@submodule ember-views
-*/
-
-var hasElement = Ember.View.states.hasElement;
 var inDOM = Ember.View.states.inDOM = Ember.create(hasElement);
 
 Ember.merge(inDOM, {
@@ -4365,7 +4353,7 @@ var get = Ember.get, set = Ember.set, fmt = Ember.String.fmt;
   Given an empty `<body>` and the following code:
 
   ```javascript
-  anUnorderedListView = Ember.CollectionView.create({
+  anUndorderedListView = Ember.CollectionView.create({
     tagName: 'ul',
     content: ['A','B','C'],
     itemViewClass: Ember.View.extend({
@@ -4373,7 +4361,7 @@ var get = Ember.get, set = Ember.set, fmt = Ember.String.fmt;
     })
   });
 
-  anUnorderedListView.appendTo('body');
+  anUndorderedListView.appendTo('body');
   ```
 
   Will result in the following HTML structure
@@ -4723,70 +4711,6 @@ Ember.CollectionView.CONTAINER_MAP = {
 
 
 (function() {
-/**
-  The ComponentTemplateDeprecation mixin is used to provide a useful
-  deprecation warning when using either `template` or `templateName` with
-  a component. The `template` and `templateName` properties specified at
-  extend time are moved to `layout` and `layoutName` respectively.
-
-  `Ember.ComponentTemplateDeprecation` is used internally by Ember in
-  `Ember.Component`.
-
-  @class ComponentTemplateDeprecation
-  @namespace Ember
-*/
-Ember.ComponentTemplateDeprecation = Ember.Mixin.create({
-  /**
-    @private
-
-    Moves `templateName` to `layoutName` and `template` to `layout` at extend
-    time if a layout is not also specified.
-
-    Note that this currently modifies the mixin themselves, which is technically
-    dubious but is practically of little consequence. This may change in the
-    future.
-
-    @method willMergeMixin
-  */
-  willMergeMixin: function(props) {
-    // must call _super here to ensure that the ActionHandler
-    // mixin is setup properly (moves actions -> _actions)
-    //
-    // Calling super is only OK here since we KNOW that
-    // there is another Mixin loaded first.
-    this._super.apply(this, arguments);
-
-    var deprecatedProperty, replacementProperty,
-        layoutSpecified = (props.layoutName || props.layout);
-
-    if (props.templateName && !layoutSpecified) {
-      deprecatedProperty = 'templateName';
-      replacementProperty = 'layoutName';
-
-      props.layoutName = props.templateName;
-      delete props['templateName'];
-    }
-
-    if (props.template && !layoutSpecified) {
-      deprecatedProperty = 'template';
-      replacementProperty = 'layout';
-
-      props.layout = props.template;
-      delete props['template'];
-    }
-
-    if (deprecatedProperty) {
-      Ember.deprecate('Do not specify ' + deprecatedProperty + ' on a Component, use ' + replacementProperty + ' instead.', false);
-    }
-  }
-});
-
-
-})();
-
-
-
-(function() {
 var get = Ember.get, set = Ember.set, isNone = Ember.isNone,
     a_slice = Array.prototype.slice;
 
@@ -4881,7 +4805,7 @@ var get = Ember.get, set = Ember.set, isNone = Ember.isNone,
   @namespace Ember
   @extends Ember.View
 */
-Ember.Component = Ember.View.extend(Ember.TargetActionSupport, Ember.ComponentTemplateDeprecation, {
+Ember.Component = Ember.View.extend(Ember.TargetActionSupport, {
   init: function() {
     this._super();
     set(this, 'context', this);
@@ -4892,45 +4816,6 @@ Ember.Component = Ember.View.extend(Ember.TargetActionSupport, Ember.ComponentTe
     options.data = {view: options._context};
     Ember.Handlebars.helpers['yield'].apply(this, [options]);
   },
-
-  /**
-  A components template property is set by passing a block
-  during its invocation. It is executed within the parent context.
-
-  Example:
-
-  ```handlebars
-  {{#my-component}}
-    // something that is run in the context
-    // of the parent context
-  {{/my-component}}
-  ```
-
-  Specifying a template directly to a component is deprecated without
-  also specifying the layout property.
-
-  @deprecated
-  @property template
-  */
-  template: Ember.computed(function(key, value) {
-    if (value !== undefined) { return value; }
-
-    var templateName = get(this, 'templateName'),
-        template = this.templateForName(templateName, 'template');
-
-    Ember.assert("You specified the templateName " + templateName + " for " + this + ", but it did not exist.", !templateName || template);
-
-    return template || get(this, 'defaultTemplate');
-  }).property('templateName'),
-
-  /**
-  Specifying a components `templateName` is deprecated without also
-  providing the `layout` or `layoutName` properties.
-
-  @deprecated
-  @property templateName
-  */
-  templateName: null,
 
   // during render, isolate keywords
   cloneKeywords: function() {

@@ -23,7 +23,7 @@
 
   @class Ember
   @static
-  @version 1.5.0-beta.1+canary.6fabe753
+  @version 1.3.0
 */
 
 if ('undefined' === typeof Ember) {
@@ -50,10 +50,10 @@ Ember.toString = function() { return "Ember"; };
 /**
   @property VERSION
   @type String
-  @default '1.5.0-beta.1+canary.6fabe753'
+  @default '1.3.0'
   @static
 */
-Ember.VERSION = '1.5.0-beta.1+canary.6fabe753';
+Ember.VERSION = '1.3.0';
 
 /**
   Standard environmental variables. You can define these in a global `EmberENV`
@@ -528,49 +528,17 @@ var arrayIndexOf = isNativeFunc(Array.prototype.indexOf) ? Array.prototype.index
   return -1;
 };
 
-if (Ember.FEATURES.isEnabled('array-filter')) {
-  var arrayFilter = isNativeFunc(Array.prototype.filter) ? Array.prototype.filter : function (fn, context) {
-    var i,
-    value,
-    result = [],
-    length = this.length;
+/**
+  Array polyfills to support ES5 features in older browsers.
 
-    for (i = 0; i < length; i++) {
-      if (this.hasOwnProperty(i)) {
-        value = this[i];
-        if (fn.call(context, value, i, this)) {
-          result.push(value);
-        }
-      }
-    }
-    return result;
-  };
-
-  /**
-    Array polyfills to support ES5 features in older browsers.
-
-    @namespace Ember
-    @property ArrayPolyfills
-  */
-  Ember.ArrayPolyfills = {
-    map: arrayMap,
-    forEach: arrayForEach,
-    filter: arrayFilter,
-    indexOf: arrayIndexOf
-  };
-} else {
-  /**
-    Array polyfills to support ES5 features in older browsers.
-
-    @namespace Ember
-    @property ArrayPolyfills
-  */
-  Ember.ArrayPolyfills = {
-    map: arrayMap,
-    forEach: arrayForEach,
-    indexOf: arrayIndexOf
-  };
-}
+  @namespace Ember
+  @property ArrayPolyfills
+*/
+Ember.ArrayPolyfills = {
+  map: arrayMap,
+  forEach: arrayForEach,
+  indexOf: arrayIndexOf
+};
 
 if (Ember.SHIM_ES5) {
   if (!Array.prototype.map) {
@@ -838,8 +806,7 @@ Meta.prototype = {
   bindings: null,
   chains: null,
   chainWatchers: null,
-  values: null,
-  proto: null
+  values: null
 };
 
 if (isDefinePropertySimulated) {
@@ -1346,41 +1313,6 @@ Ember.typeOf = function(item) {
   return ret;
 };
 
-/**
-  Convenience method to inspect an object. This method will attempt to
-  convert the object into a useful string description.
-
-  It is a pretty simple implementation. If you want something more robust,
-  use something like JSDump: https://github.com/NV/jsDump
-
-  @method inspect
-  @for Ember
-  @param {Object} obj The object you want to inspect.
-  @return {String} A description of the object
-*/
-Ember.inspect = function(obj) {
-  var type = Ember.typeOf(obj);
-  if (type === 'array') {
-    return '[' + obj + ']';
-  }
-  if (type !== 'object') {
-    return obj + '';
-  }
-
-  var v, ret = [];
-  for(var key in obj) {
-    if (obj.hasOwnProperty(key)) {
-      v = obj[key];
-      if (v === 'toString') { continue; } // ignore useless items
-      if (Ember.typeOf(v) === 'function') { v = "function() { ... }"; }
-      ret.push(key + ": " + v);
-    }
-  }
-  return "{" + ret.join(", ") + "}";
-};
-
-
-
 })();
 
 
@@ -1595,11 +1527,10 @@ Ember.subscribe = Ember.Instrumentation.subscribe;
 
 
 (function() {
-var map, forEach, indexOf, splice, filter;
+var map, forEach, indexOf, splice;
 map     = Array.prototype.map     || Ember.ArrayPolyfills.map;
 forEach = Array.prototype.forEach || Ember.ArrayPolyfills.forEach;
 indexOf = Array.prototype.indexOf || Ember.ArrayPolyfills.indexOf;
-filter = Array.prototype.filter || Ember.ArrayPolyfills.filter;
 splice = Array.prototype.splice;
 
 var utils = Ember.EnumerableUtils = {
@@ -1609,10 +1540,6 @@ var utils = Ember.EnumerableUtils = {
 
   forEach: function(obj, callback, thisArg) {
     return obj.forEach ? obj.forEach.call(obj, callback, thisArg) : forEach.call(obj, callback, thisArg);
-  },
-
-  filter: function(obj, callback, thisArg) {
-    return obj.filter ? obj.filter.call(obj, callback, thisArg) : filter.call(obj, callback, thisArg);
   },
 
   indexOf: function(obj, element, index) {
@@ -1796,7 +1723,7 @@ var normalizeTuple = Ember.normalizeTuple = function(target, path) {
   }
 
   // must return some kind of path to be valid else other things will break.
-  if (!path || path.length===0) throw new Ember.Error('Path cannot be empty');
+  if (!path || path.length===0) throw new Ember.Error('Invalid Path');
 
   return [ target, path ];
 };
@@ -3333,12 +3260,6 @@ Ember.defineProperty = function(obj, keyName, desc, data, meta) {
     } else {
       obj[keyName] = undefined; // make enumerable
     }
-
-    if (Ember.FEATURES.isEnabled('composable-computed-properties')) {
-      if (desc.func && desc._dependentCPs) {
-        addImplicitCPs(obj, desc._dependentCPs, meta);
-      }
-    }
   } else {
     descs[keyName] = undefined; // shadow descriptor in proto
     if (desc == null) {
@@ -3374,22 +3295,6 @@ Ember.defineProperty = function(obj, keyName, desc, data, meta) {
   return this;
 };
 
-if (Ember.FEATURES.isEnabled('composable-computed-properties')) {
-  var addImplicitCPs = function defineImplicitCPs(obj, implicitCPs, meta) {
-    var cp, key, length = implicitCPs.length;
-
-    for (var i=0; i<length; ++i) {
-      cp = implicitCPs[i];
-      key = cp.implicitCPKey;
-
-      Ember.defineProperty(obj, key, cp, undefined, meta);
-
-      if (cp._dependentCPs) {
-        addImplicitCPs(obj, cp._dependentCPs, meta);
-      }
-    }
-  };
-}
 
 })();
 
@@ -4123,10 +4028,6 @@ var get = Ember.get,
     watch = Ember.watch,
     unwatch = Ember.unwatch;
 
-
-if (Ember.FEATURES.isEnabled('composable-computed-properties')) {
-}
-
 if (Ember.FEATURES.isEnabled('propertyBraceExpansion')) {
   var expandProperties = Ember.expandProperties;
 }
@@ -4289,13 +4190,9 @@ function removeDependentKeys(desc, obj, keyName, meta) {
 */
 function ComputedProperty(func, opts) {
   this.func = func;
-  if (Ember.FEATURES.isEnabled('composable-computed-properties')) {
-    setDependentKeys(this, opts && opts.dependentKeys);
-  } else {
-    this._dependentKeys = opts && opts.dependentKeys;
-  }
 
   this._cacheable = (opts && opts.cacheable !== undefined) ? opts.cacheable : true;
+  this._dependentKeys = opts && opts.dependentKeys;
   this._readOnly = opts && (opts.readOnly !== undefined || !!opts.readOnly);
 }
 
@@ -4303,15 +4200,6 @@ Ember.ComputedProperty = ComputedProperty;
 ComputedProperty.prototype = new Ember.Descriptor();
 
 var ComputedPropertyPrototype = ComputedProperty.prototype;
-
-if (Ember.FEATURES.isEnabled('composable-computed-properties')) {
-  ComputedPropertyPrototype.toString = function() {
-    if (this.implicitCPKey) {
-      return this.implicitCPKey;
-    }
-    return Ember.Descriptor.prototype.toString.apply(this, arguments);
-  };
-}
 
 /**
   Properties are cacheable by default. Computed property will automatically
@@ -4420,12 +4308,7 @@ ComputedPropertyPrototype.property = function() {
     args = a_slice.call(arguments);
   }
 
-  if (Ember.FEATURES.isEnabled('composable-computed-properties')) {
-    setDependentKeys(this, args);
-  } else {
-    this._dependentKeys = args;
-  }
-
+  this._dependentKeys = args;
   return this;
 };
 
@@ -4552,7 +4435,7 @@ ComputedPropertyPrototype.set = function(obj, keyName, value) {
       funcArgLength, cachedValue, ret;
 
   if (this._readOnly) {
-    throw new Ember.Error('Cannot Set: ' + keyName + ' on: ' + Ember.inspect(obj));
+    throw new Ember.Error('Cannot Set: ' + keyName + ' on: ' + obj.toString() );
   }
 
   this._suspended = obj;
@@ -4683,107 +4566,24 @@ function getProperties(self, propertyNames) {
   return ret;
 }
 
-var registerComputed, registerComputedWithProperties;
-
-if (Ember.FEATURES.isEnabled('composable-computed-properties')) {
-  var guidFor = Ember.guidFor,
-      map = Ember.EnumerableUtils.map,
-      filter = Ember.EnumerableUtils.filter,
-      typeOf = Ember.typeOf;
-
-  var implicitKey = function (cp) {
-    return [guidFor(cp)].concat(cp._dependentKeys).join('_');
-  };
-
-  var normalizeDependentKey = function (key) {
-    if (key instanceof Ember.ComputedProperty) {
-      return implicitKey(key);
-    } else if (typeof key === 'string' || key instanceof String || typeof key === 'object' || typeof key === 'number') {
-      return key;
-    } else {
-      Ember.assert('Unexpected dependent key  ' + key + ' of type ' + typeof(key), false);
-    }
-  };
-
-  var normalizeDependentKeys = function (keys) {
-    return map(keys, function (key) {
-      return normalizeDependentKey(key);
+function registerComputed(name, macro) {
+  Ember.computed[name] = function(dependentKey) {
+    var args = a_slice.call(arguments);
+    return Ember.computed(dependentKey, function() {
+      return macro.apply(this, args);
     });
-  };
-
-  var selectDependentCPs = function (keys) {
-    return filter(keys, function (key) {
-      return key instanceof Ember.ComputedProperty;
-    });
-  };
-
-  var setDependentKeys = function(cp, dependentKeys) {
-    if (dependentKeys) {
-      cp._dependentKeys = normalizeDependentKeys(dependentKeys);
-      cp._dependentCPs = selectDependentCPs(dependentKeys);
-      cp.implicitCPKey = implicitKey(cp);
-    } else {
-      cp._dependentKeys = cp._dependentCPs = [];
-      delete cp.implicitCPKey;
-    }
-  };
-  // expose `normalizeDependentKey[s]` so user CP macros can easily support
-  // composition
-  Ember.computed.normalizeDependentKey = normalizeDependentKey;
-  Ember.computed.normalizeDependentKeys = normalizeDependentKeys;
-
-  registerComputed = function (name, macro) {
-    Ember.computed[name] = function(dependentKey) {
-      var args = normalizeDependentKeys(a_slice.call(arguments));
-      return Ember.computed(dependentKey, function() {
-        return macro.apply(this, args);
-      });
-    };
   };
 }
 
-if (Ember.FEATURES.isEnabled('composable-computed-properties')) {
-  registerComputedWithProperties = function(name, macro) {
-    Ember.computed[name] = function() {
-      var args = a_slice.call(arguments);
-      var properties = normalizeDependentKeys(args);
+function registerComputedWithProperties(name, macro) {
+  Ember.computed[name] = function() {
+    var properties = a_slice.call(arguments);
 
-      var computed = Ember.computed(function() {
-        return macro.apply(this, [getProperties(this, properties)]);
-      });
-
-      return computed.property.apply(computed, args);
-    };
-  };
-} else {
-  registerComputed = function (name, macro) {
-    Ember.computed[name] = function(dependentKey) {
-      var args = a_slice.call(arguments);
-      return Ember.computed(dependentKey, function() {
-        return macro.apply(this, args);
-      });
-    };
-  };
-
-  registerComputedWithProperties = function(name, macro) {
-    Ember.computed[name] = function() {
-      var properties = a_slice.call(arguments);
-
-      var computed = Ember.computed(function() {
-        return macro.apply(this, [getProperties(this, properties)]);
-      });
-
-      return computed.property.apply(computed, properties);
-    };
-  };
-}
-
-
-if (Ember.FEATURES.isEnabled('composable-computed-properties')) {
-  Ember.computed.literal = function (value) {
-    return Ember.computed(function () {
-      return value;
+    var computed = Ember.computed(function() {
+      return macro.apply(this, [getProperties(this, properties)]);
     });
+
+    return computed.property.apply(computed, properties);
   };
 }
 
@@ -5316,51 +5116,7 @@ Ember.computed.oneWay = function(dependentKey) {
   });
 };
 
-if (Ember.FEATURES.isEnabled('computed-read-only')) {
-/**
-  Where `computed.oneWay` provides oneWay bindings, `computed.readOnly` provides
-  a readOnly one way binding. Very often when using `computed.oneWay` one does
-  not also want changes to propogate back up, as they will replace the value.
 
-  This prevents the reverse flow, and also throws an exception when it occurs.
-
-  Example
-
-  ```javascript
-  User = Ember.Object.extend({
-    firstName: null,
-    lastName: null,
-    nickName: Ember.computed.readOnly('firstName')
-  });
-
-  user = User.create({
-    firstName: 'Teddy',
-    lastName:  'Zeenny'
-  });
-
-  user.get('nickName');
-  # 'Teddy'
-
-  user.set('nickName', 'TeddyBear');
-  # throws Exception
-  # throw new Ember.Error('Cannot Set: nickName on: <User:ember27288>' );`
-
-  user.get('firstName');
-  # 'Teddy'
-  ```
-
-  @method computed.readOnly
-  @for Ember
-  @param {String} dependentKey
-  @return {Ember.ComputedProperty} computed property which creates a
-  one way computed property to the original value for property.
-*/
-Ember.computed.readOnly = function(dependentKey) {
-  return Ember.computed(dependentKey, function() {
-    return get(this, dependentKey);
-  }).readOnly();
-};
-}
 /**
   A computed property that acts like a standard getter and setter,
   but returns the value at the provided `defaultPath` if the
@@ -6174,8 +5930,7 @@ var Backburner = requireModule('backburner').Backburner,
       onBegin: onBegin,
       onEnd: onEnd
     }),
-    slice = [].slice,
-    concat = [].concat;
+    slice = [].slice;
 
 // ..........................................................
 // Ember.run - this is ideally the only public API the dev sees
@@ -6261,7 +6016,7 @@ Ember.run = function(target, method) {
   @return {Object} Return value from invoking the passed function. Please note,
   when called within an existing loop, no return value is possible.
 */
-Ember.run.join = function(target, method /* args */) {
+Ember.run.join = function(target, method) {
   if (!Ember.run.currentRunLoop) {
     return Ember.run.apply(Ember.run, arguments);
   }
@@ -6270,55 +6025,6 @@ Ember.run.join = function(target, method /* args */) {
   args.unshift('actions');
   Ember.run.schedule.apply(Ember.run, args);
 };
-
-if (Ember.FEATURES.isEnabled('ember-metal-run-bind')) {
-/**
-  Provides a useful utility for when integrating with non-Ember libraries
-  that provide asynchronous callbacks.
-
-  Ember utilizes a run-loop to batch and coalesce changes. This works by
-  marking the start and end of Ember-related Javascript execution.
-
-  When using events such as a View's click handler, Ember wraps the event
-  handler in a run-loop, but when integrating with non-Ember libraries this
-  can be tedious.
-
-  For example, the following is rather verbose but is the correct way to combine
-  third-party events and Ember code.
-
-  ```javascript
-  var that = this;
-  jQuery(window).on('resize', function(){
-    Ember.run(function(){
-      that.handleResize();
-    });
-  });
-  ```
-
-  To reduce the boilerplate, the following can be used to construct a
-  run-loop-wrapped callback handler.
-
-  ```javascript
-  jQuery(window).on('resize', Ember.run.bind(this, this.triggerResize));
-  ```
-
-  @method bind
-  @namespace Ember.run
-  @param {Object} [target] target of method to call
-  @param {Function|String} method Method to invoke.
-    May be a function or a string. If you pass a string
-    then it will be looked up on the passed target.
-  @param {Object} [args*] Any additional arguments you wish to pass to the method.
-  @return {Object} return value from invoking the passed function. Please note,
-  when called within an existing loop, no return value is possible.
-*/
-  Ember.run.bind = function(target, method /* args*/) {
-    var args = arguments;
-    return function() {
-      return Ember.run.join.apply(Ember.run, args);
-    };
-  };
-}
 
 Ember.run.backburner = backburner;
 
@@ -6489,7 +6195,7 @@ Ember.run.later = function(target, method) {
     If you pass a string it will be resolved on the
     target at the time the method is invoked.
   @param {Object} [args*] Optional arguments to pass to the timeout.
-  @return {Object} Timer information for use in cancelling, see `Ember.run.cancel`.
+  @return {Object} timer
 */
 Ember.run.once = function(target, method) {
   checkAutoRun();
@@ -6540,7 +6246,7 @@ Ember.run.once = function(target, method) {
     If you pass a string it will be resolved on the
     target at the time the method is invoked.
   @param {Object} [args*] Optional arguments to pass to the timeout.
-  @return {Object} Timer information for use in cancelling, see `Ember.run.cancel`.
+  @return {Object} timer
 */
 Ember.run.scheduleOnce = function(queue, target, method) {
   checkAutoRun();
@@ -6603,7 +6309,7 @@ Ember.run.scheduleOnce = function(queue, target, method) {
     If you pass a string it will be resolved on the
     target at the time the method is invoked.
   @param {Object} [args*] Optional arguments to pass to the timeout.
-  @return {Object} Timer information for use in cancelling, see `Ember.run.cancel`.
+  @return {Object} timer
 */
 Ember.run.next = function() {
   var args = slice.call(arguments);
@@ -6613,8 +6319,7 @@ Ember.run.next = function() {
 
 /**
   Cancels a scheduled item. Must be a value returned by `Ember.run.later()`,
-  `Ember.run.once()`, `Ember.run.next()`, `Ember.run.debounce()`, or
-  `Ember.run.throttle()`.
+  `Ember.run.once()`, or `Ember.run.next()`.
 
   ```javascript
   var runNext = Ember.run.next(myContext, function() {
@@ -6631,29 +6336,11 @@ Ember.run.next = function() {
     // will not be executed
   });
   Ember.run.cancel(runOnce);
-
-  var throttle = Ember.run.throttle(myContext, function() {
-    // will not be executed
-  }, 1);
-  Ember.run.cancel(throttle);
-
-  var debounce = Ember.run.debounce(myContext, function() {
-    // will not be executed
-  }, 1);
-  Ember.run.cancel(debounce);
-
-  var debounceImmediate = Ember.run.debounce(myContext, function() {
-    // will be executed since we passed in true (immediate)
-  }, 100, true);
-  // the 100ms delay until this method can be called again will be cancelled
-  Ember.run.cancel(debounceImmediate);
-  ```
-  ```
   ```
 
   @method cancel
   @param {Object} timer Timer object to cancel
-  @return {Boolean} true if cancelled or false/undefined if it wasn't found
+  @return {void}
 */
 Ember.run.cancel = function(timer) {
   return backburner.cancel(timer);
@@ -6685,34 +6372,6 @@ Ember.run.cancel = function(timer) {
     // console logs 'debounce ran.' one time.
   ```
 
-  Immediate allows you to run the function immediately, but debounce
-  other calls for this function until the wait time has elapsed. If
-  `debounce` is called again before the specified time has elapsed,
-  the timer is reset and the entire period msut pass again before
-  the method can be called again.
-
-  ```javascript
-    var myFunc = function() { console.log(this.name + ' ran.'); };
-    var myContext = {name: 'debounce'};
-
-    Ember.run.debounce(myContext, myFunc, 150, true);
-
-    // console logs 'debounce ran.' one time immediately.
-    // 100ms passes
-
-    Ember.run.debounce(myContext, myFunc, 150, true);
-
-    // 150ms passes and nothing else is logged to the console and
-    // the debouncee is no longer being watched
-
-    Ember.run.debounce(myContext, myFunc, 150, true);
-
-    // console logs 'debounce ran.' one time immediately.
-    // 150ms passes and nothing else is logged tot he console and
-    // the debouncee is no longer being watched
-
-  ```
-
   @method debounce
   @param {Object} [target] target of method to invoke
   @param {Function|String} method The method to invoke.
@@ -6721,7 +6380,7 @@ Ember.run.cancel = function(timer) {
   @param {Object} [args*] Optional arguments to pass to the timeout.
   @param {Number} wait Number of milliseconds to wait.
   @param {Boolean} immediate Trigger the function on the leading instead of the trailing edge of the wait interval.
-  @return {Array} Timer information for use in cancelling, see `Ember.run.cancel`.
+  @return {void}
 */
 Ember.run.debounce = function() {
   return backburner.debounce.apply(backburner, arguments);
@@ -6758,7 +6417,7 @@ Ember.run.debounce = function() {
     then it will be looked up on the passed target.
   @param {Object} [args*] Optional arguments to pass to the timeout.
   @param {Number} spacing Number of milliseconds to space out requests.
-  @return {Array} Timer information for use in cancelling, see `Ember.run.cancel`.
+  @return {void}
 */
 Ember.run.throttle = function() {
   return backburner.throttle.apply(backburner, arguments);
@@ -7845,6 +7504,35 @@ Alias = function(methodName) {
   this.methodName = methodName;
 };
 Alias.prototype = new Ember.Descriptor();
+
+/**
+  Makes a property or method available via an additional name.
+
+  ```javascript
+  App.PaintSample = Ember.Object.extend({
+    color: 'red',
+    colour: Ember.alias('color'),
+    name: function() {
+      return "Zed";
+    },
+    moniker: Ember.alias("name")
+  });
+
+  var paintSample = App.PaintSample.create()
+  paintSample.get('colour');  // 'red'
+  paintSample.moniker();      // 'Zed'
+  ```
+
+  @method alias
+  @for Ember
+  @param {String} methodName name of the method or property to alias
+  @return {Ember.Descriptor}
+  @deprecated Use `Ember.aliasMethod` or `Ember.computed.alias` instead
+*/
+Ember.alias = function(methodName) {
+  Ember.deprecate("Ember.alias is deprecated. Please use Ember.aliasMethod or Ember.computed.alias instead.");
+  return new Alias(methodName);
+};
 
 /**
   Makes a method available via an additional name.
